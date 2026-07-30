@@ -1,0 +1,257 @@
+/* ═══════════════════════════════════════════════════════════
+   工作台外壳。
+
+   刻意做成深色:中间那张纸是白的,外壳越暗,视线越容易落在纸上。
+   这里的样式跟 skins/ 完全隔离 —— 简历活在 iframe 里,
+   两边的 CSS 碰不到对方,皮肤怎么改都不会把工作台弄花。
+   ═══════════════════════════════════════════════════════════ */
+
+*{box-sizing:border-box;margin:0;padding:0}
+
+:root{
+  --bg:#16181B;
+  --bg-2:#1D2024;
+  --bg-3:#25292E;
+  --line:#31363C;
+  --fg:#E8E6E3;
+  --fg-2:#A8ADB3;
+  --fg-3:#6E757C;
+  --accent:#4FB3A8;
+  --accent-dim:#2C6F69;
+  --warn:#D9A23B;
+  --bad:#D9614C;
+  --ok:#5FA86B;
+  --ui:-apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue",sans-serif;
+  --mono:"SF Mono",ui-monospace,Menlo,monospace;
+  --bar-h:48px;
+}
+
+body{
+  font-family:var(--ui);
+  font-size:13px;
+  color:var(--fg);
+  background:var(--bg);
+  height:100vh;
+  overflow:hidden;
+  -webkit-font-smoothing:antialiased;
+}
+
+/* ── 顶栏 ── */
+.bar{
+  height:var(--bar-h);
+  display:grid;
+  grid-template-columns:1fr auto 1fr;
+  align-items:center;
+  gap:12px;
+  padding:0 14px;
+  background:var(--bg-2);
+  border-bottom:1px solid var(--line);
+}
+.bar-l{display:flex;align-items:center;gap:10px;min-width:0}
+.bar-r{display:flex;align-items:center;gap:8px;justify-content:flex-end}
+.bar-c{justify-self:center;display:flex;align-items:center;gap:10px}
+.logo{font-weight:600;letter-spacing:.02em;white-space:nowrap}
+.file{
+  font-family:var(--mono);font-size:11px;color:var(--fg-3);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+
+/* 排版状态:三种结论三个颜色,一眼知道能不能投 */
+.fit{
+  font-size:12px;padding:4px 11px;border-radius:20px;
+  background:var(--bg-3);color:var(--fg-2);
+  border:1px solid var(--line);white-space:nowrap;
+  transition:background .15s,color .15s,border-color .15s;
+}
+.fit[data-state="ok"]{color:var(--ok);border-color:#2E4A34}
+.fit[data-state="tight"]{color:var(--warn);border-color:#4A3D22}
+.fit[data-state="clipped"]{color:#fff;background:var(--bad);border-color:var(--bad)}
+.fit[data-state="busy"]{color:var(--fg-3)}
+
+/* ── 按钮 ── */
+.btn{
+  font:inherit;font-size:12px;
+  padding:6px 13px;border-radius:6px;
+  border:1px solid var(--line);
+  background:var(--bg-3);color:var(--fg);
+  cursor:pointer;white-space:nowrap;
+  transition:background .12s,border-color .12s,opacity .12s;
+}
+.btn:hover:not(:disabled){background:#2E333A;border-color:#3D444C}
+.btn:active:not(:disabled){transform:translateY(1px)}
+.btn:disabled{opacity:.38;cursor:default}
+.btn.primary{background:var(--accent-dim);border-color:#38867F;color:#F2FBFA}
+.btn.primary:hover:not(:disabled){background:#35837C}
+.btn.ghost{background:transparent}
+.btn.wide{width:100%;justify-content:center;margin-top:10px}
+.btn.dirty{background:var(--accent);border-color:var(--accent);color:#0C2725;font-weight:600}
+
+/* ── 主区 ── */
+.wrap{
+  height:calc(100vh - var(--bar-h));
+  display:grid;
+  grid-template-columns:1fr 268px;
+}
+.stage{
+  overflow:auto;
+  padding:26px 26px 0;
+  display:flex;flex-direction:column;align-items:center;
+  background:
+    radial-gradient(ellipse at 50% 0%,#1E2226 0%,var(--bg) 62%);
+}
+.paper-hold{
+  /* 只露出 A4 那一块：794×1123 是 210×297mm 在 96dpi 下的 CSS 像素数。 */
+  width:794px;
+  height:1123px;
+  flex:none;
+  box-shadow:0 1px 2px rgba(0,0,0,.5),0 12px 34px rgba(0,0,0,.42);
+  border-radius:2px;
+  overflow:hidden;
+  background:#fff;
+  position:relative;
+}
+/*
+ * iframe 故意开到 900px 宽 —— 比纸还宽。
+ *
+ * A4 在 96dpi 下正好 793.7px，比皮肤里 max-width:820px 那道窄屏断点还窄；
+ * 按纸的尺寸给 iframe，命中的是给手机准备的那套规则（height:auto、正文 11pt），
+ * 排版和量出来的高度全是错的。所以给足宽度走桌面规则，
+ * 多出来的边由 .paper-hold 裁掉，位置在 alignPaper() 里按实测对齐。
+ */
+#paper{position:absolute;top:0;left:0;width:900px;height:1123px;border:0;display:block}
+.stage-foot{padding:16px 0 26px}
+
+/* ── 右侧面板 ── */
+.side{
+  background:var(--bg-2);
+  border-left:1px solid var(--line);
+  overflow:hidden;
+  display:flex;
+}
+.side-scroll{overflow-y:auto;padding:4px 0 30px;width:100%}
+.grp{padding:14px 14px 16px;border-bottom:1px solid var(--line)}
+.grp:last-child{border-bottom:0}
+.grp h3{
+  font-size:10.5px;font-weight:600;
+  letter-spacing:.12em;text-transform:uppercase;
+  color:var(--fg-3);margin-bottom:10px;
+}
+.hint{font-size:11px;color:var(--fg-3);line-height:1.5;margin:-4px 0 9px}
+
+/* 旋钮 */
+.knob{margin-bottom:11px}
+.knob-top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px}
+.knob-top label{font-size:12px;color:var(--fg-2)}
+.knob-val{font-family:var(--mono);font-size:11px;color:var(--accent)}
+.knob-val.off{color:var(--fg-3)}
+.knob input[type=range]{
+  width:100%;height:16px;appearance:none;background:transparent;cursor:pointer;
+}
+.knob input[type=range]::-webkit-slider-runnable-track{
+  height:3px;border-radius:2px;background:var(--bg-3);
+}
+.knob input[type=range]::-webkit-slider-thumb{
+  appearance:none;width:13px;height:13px;border-radius:50%;
+  background:var(--fg-2);margin-top:-5px;border:0;
+  transition:background .12s;
+}
+.knob input[type=range]:hover::-webkit-slider-thumb{background:var(--accent)}
+
+/* 色板 */
+.swatches{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.sw{display:flex;align-items:center;gap:7px;min-width:0}
+.sw input[type=color]{
+  width:22px;height:22px;flex:none;padding:0;border:1px solid var(--line);
+  border-radius:5px;background:none;cursor:pointer;
+}
+.sw input[type=color]::-webkit-color-swatch-wrapper{padding:2px}
+.sw input[type=color]::-webkit-color-swatch{border:0;border-radius:3px}
+.sw span{font-size:11px;color:var(--fg-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+.inp{
+  width:100%;font:inherit;font-size:12px;
+  padding:6px 8px;border-radius:6px;
+  background:var(--bg-3);color:var(--fg);
+  border:1px solid var(--line);
+}
+
+/* 章节列表 */
+.sec-list{list-style:none;display:flex;flex-direction:column;gap:3px}
+.sec-list li{
+  display:flex;align-items:center;gap:6px;
+  padding:5px 6px;border-radius:5px;
+  background:var(--bg-3);font-size:12px;
+}
+.sec-list .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}
+.sec-list .nm:hover{color:var(--accent)}
+.sec-list .vr{
+  font-size:9.5px;color:var(--fg-3);font-family:var(--mono);
+  padding:1px 4px;border:1px solid var(--line);border-radius:3px;
+}
+.sec-list button{
+  background:none;border:0;color:var(--fg-3);cursor:pointer;
+  font-size:13px;line-height:1;padding:2px 3px;border-radius:3px;
+}
+.sec-list button:hover{color:var(--bad);background:#2E2224}
+
+/* 导出格式 */
+.fmts{display:flex;flex-direction:column;gap:2px}
+.fmts label{
+  display:grid;grid-template-columns:auto auto 1fr;align-items:center;
+  gap:7px;padding:6px 7px;border-radius:6px;cursor:pointer;
+  transition:background .12s;
+}
+.fmts label:hover{background:var(--bg-3)}
+.fmts input{accent-color:var(--accent);margin:0}
+.fmts b{font-size:12px;font-weight:500}
+.fmts i{font-size:10.5px;color:var(--fg-3);font-style:normal;text-align:right}
+
+.results{margin-top:9px;display:flex;flex-direction:column;gap:4px}
+.results a{
+  display:flex;justify-content:space-between;gap:8px;
+  font-size:11.5px;color:var(--accent);text-decoration:none;
+  padding:5px 7px;border-radius:5px;background:var(--bg-3);
+}
+.results a:hover{background:#2E333A}
+.results a em{color:var(--fg-3);font-style:normal;font-size:10.5px;white-space:nowrap}
+.results .err{font-size:11.5px;color:var(--bad);line-height:1.5;padding:5px 7px}
+
+.tips{list-style:none;font-size:11.5px;color:var(--fg-3);line-height:1.65}
+.tips li{margin-bottom:5px;padding-left:11px;position:relative}
+.tips li::before{content:"·";position:absolute;left:2px;color:var(--fg-3)}
+.tips code{
+  font-family:var(--mono);font-size:10.5px;
+  background:var(--bg-3);padding:1px 4px;border-radius:3px;color:var(--fg-2);
+}
+.tips b{color:var(--fg-2);font-weight:600}
+
+/* ── 选中文字时浮出来的格式条 ── */
+.fmt-bar{
+  position:fixed;z-index:60;display:flex;gap:2px;
+  padding:3px;border-radius:7px;
+  background:var(--bg-3);border:1px solid #3D444C;
+  box-shadow:0 4px 14px rgba(0,0,0,.5);
+}
+.fmt-bar button{
+  width:27px;height:24px;border:0;border-radius:5px;
+  background:none;color:var(--fg);cursor:pointer;font-size:12px;
+}
+.fmt-bar button:hover{background:#383E46}
+.fmt-bar code{font-family:var(--mono);color:var(--accent)}
+
+/* ── 提示条 ── */
+.toast{
+  position:fixed;left:50%;bottom:26px;transform:translateX(-50%);
+  z-index:70;padding:8px 16px;border-radius:8px;
+  background:var(--bg-3);border:1px solid var(--line);
+  font-size:12px;color:var(--fg);
+  box-shadow:0 6px 20px rgba(0,0,0,.5);
+  max-width:70vw;
+}
+.toast[data-kind="bad"]{background:var(--bad);border-color:var(--bad);color:#fff}
+.toast[data-kind="ok"]{border-color:var(--accent-dim);color:var(--fg)}
+
+@media (max-width:1180px){
+  .wrap{grid-template-columns:1fr 236px}
+  .stage{padding:16px 16px 0}
+}

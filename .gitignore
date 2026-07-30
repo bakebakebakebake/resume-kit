@@ -1,0 +1,14 @@
+node_modules/
+
+# 导出产物，随时能重新生成
+dist/
+
+# 工作台每次保存前留的 resume.yaml 副本
+.studio-backups/
+
+# 字体子集：由 npm run fonts 从上游包生成，5MB 左右，不进仓库。
+# 换机器或改了简历用字之后重跑一次。
+fonts/lxgw/
+fonts/lxgw.css
+
+.DS_Store

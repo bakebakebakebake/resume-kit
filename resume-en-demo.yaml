@@ -1,0 +1,93 @@
+# ─────────────────────────────────────────────────────────────
+#  Resume Data (English Demo)
+#
+#  Inline markup supported:
+#    **bold**    → emphasized text (dark in bullets, subtle in skills)
+#    `tech`      → monospace + theme color for technical terms
+#
+#  Strings starting with ** must be quoted to avoid YAML anchor syntax.
+#
+#  You can also edit this in the browser with `npm run studio`.
+# ─────────────────────────────────────────────────────────────
+
+meta:
+  skin: datasheet
+  output: Alex-Chen-Resume
+  pages: 1
+
+profile:
+  name: Alex Chen
+  seeking: Backend Engineer
+  contact:
+    - label: Phone
+      value: +1 (415) 555-0123
+    - label: Email
+      value: alex.chen@example.com
+      href: mailto:alex.chen@example.com
+    - label: GitHub
+      value: github.com/alexchen
+      href: https://github.com/alexchen
+    - label: LinkedIn
+      value: linkedin.com/in/alexchen
+      href: https://linkedin.com/in/alexchen
+
+sections:
+  # ── Education ──────────────────────────────────
+  - title: Education
+    variant: project
+    entries:
+      - org: University of California, Berkeley
+        badge: Top 20
+        meta: B.S. in Computer Science
+        when: 2019.08 — 2023.05
+        facts:
+          - { k: GPA, v: 3.8 / 4.0 }
+          - { k: Honors, v: Dean's List }
+        awards:
+          - name: ACM-ICPC Regional Contest
+            tier: Silver Medal
+            when: 2022.11
+
+  # ── Experience ──────────────────────────────────
+  - title: Experience
+    entries:
+      - org: Stripe
+        meta: Backend Engineering Intern
+        when: 2022.06 — 2022.12
+        brief: Contributed to payment processing infrastructure, focusing on transaction reliability, idempotency, and observability improvements.
+        points:
+          - "**Payment reliability improvements**: Implemented **automatic retry with exponential backoff** for transient failures, reducing payment error rate by `15%`; added `Redis`-based distributed locks to prevent duplicate charges during network retries."
+          - "**Idempotency key enforcement**: Built middleware to validate idempotency keys across payment endpoints, preventing **duplicate transactions** from client retries; achieved `100%` coverage on high-risk endpoints within 2 months."
+          - "**Observability enhancements**: Instrumented payment flows with `OpenTelemetry` spans, enabling **end-to-end tracing** from API gateway to database; reduced **mean time to resolution** for payment incidents from `45min` to `12min`."
+
+  # ── Projects ──────────────────────────────────
+  - title: Projects
+    variant: project
+    entries:
+      - org: Distributed Task Scheduler
+        meta: Open Source · 1.2k GitHub stars
+        brief: Lightweight distributed task scheduling framework supporting cron expressions, task sharding, failure retries, and execution logs.
+        points:
+          - Built **scheduler-executor RPC** using `Netty + ZooKeeper` for dynamic registration and heartbeat monitoring; tasks automatically failover to healthy executors on node crashes.
+          - Leveraged `Quartz` for scheduling with support for **cron, fixed-rate, and one-shot** modes; persisted task state in `MySQL` for crash recovery.
+          - Designed **task sharding** algorithm using `hash(item_id) % shard_count` to parallelize large jobs across executors, achieving `10x` throughput improvement.
+          - Provided **Web UI** for job management and real-time execution logs; deployed on `AWS ECS` with `CloudWatch` monitoring.
+
+      - org: Real-Time Chat Application
+        meta: Full Stack · Team of 3
+        brief: Scalable chat platform supporting direct messaging, group chat, presence, and media uploads, serving `5k+` active users.
+        points:
+          - "**Backend**: `Node.js + Express + PostgreSQL + Redis`; used `Socket.io` for **WebSocket** connections with **Redis pub/sub** for horizontal scaling across multiple servers."
+          - "**Message delivery**: Implemented **at-least-once delivery** with client-side deduplication using message IDs; stored offline messages in `PostgreSQL` and pushed on reconnect."
+          - "**Media handling**: Integrated `AWS S3` for file uploads with **presigned URLs**; compressed images using `sharp` before storage, reducing bandwidth by `60%`."
+          - "**Deployment**: Containerized with `Docker`, orchestrated with `Kubernetes` on `GKE`; set up `Prometheus + Grafana` for monitoring and `Sentry` for error tracking."
+
+  # ── Skills ──────────────────────────────────────
+  - title: Technical Skills
+    variant: list
+    items:
+      - "**Languages**: Proficient in `Java`, `Python`, `JavaScript`/`TypeScript`, `Go`; familiar with `C++` and `Rust`."
+      - "**Backend**: `Spring Boot`, `Django`, `Express.js`, `Gin`; deep understanding of **RESTful API design**, **gRPC**, and **GraphQL**."
+      - "**Databases**: `PostgreSQL`, `MySQL`, `MongoDB`, `Redis`; solid grasp of **indexing**, **query optimization**, **ACID**, and **CAP theorem**."
+      - "**Infrastructure**: `Docker`, `Kubernetes`, `AWS` (EC2, S3, RDS, Lambda), `Terraform`; hands-on experience with **CI/CD** pipelines using `GitHub Actions`."
+      - "**Observability**: `Prometheus`, `Grafana`, `OpenTelemetry`, `Datadog`; proficient in distributed tracing and log aggregation with `ELK` stack."

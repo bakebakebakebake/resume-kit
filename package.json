@@ -1,0 +1,23 @@
+{
+  "name": "resume-kit",
+  "version": "1.0.0",
+  "private": true,
+  "description": "简历工作台：在真实排版上直接编辑，导出 PDF / Word / PNG / 单文件 HTML",
+  "type": "module",
+  "bin": {
+    "resume-kit": "./src/cli.js"
+  },
+  "scripts": {
+    "studio": "node src/cli.js studio --no-open",
+    "build": "node src/cli.js build",
+    "pdf": "node src/cli.js pdf",
+    "dev": "node src/cli.js dev",
+    "check": "node src/cli.js check",
+    "test": "node src/cli.js test",
+    "fonts": "node src/cli.js fonts"
+  },
+  "dependencies": {
+    "handlebars": "4.7.8",
+    "yaml": "2.8.1"
+  }
+}

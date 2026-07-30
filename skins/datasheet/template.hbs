@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="{{meta.lang}}">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{profile.name}}</title>
+<style>
+{{css}}
+</style>
+{{themeStyle}}
+</head>
+<body>
+<div class="sheet">
+
+  <header class="mast">
+    <div>
+      <h1 class="name" data-bind="profile.name">{{profile.name}}</h1>
+      {{#if profile.seeking}}<div class="seeking">求职岗位 · <b data-bind="profile.seeking">{{profile.seeking}}</b></div>{{/if}}
+    </div>
+    {{#if profile.contact}}
+    <dl class="chan" data-list="profile.contact">
+      {{#each profile.contact}}
+      <dt data-bind="{{_p}}.label">{{label}}</dt><dd data-row="{{_p}}">{{#if href}}<a href="{{href}}" data-bind="{{_p}}.value">{{value}}</a>{{else}}<span data-bind="{{_p}}.value">{{value}}</span>{{/if}}</dd>
+      {{/each}}
+    </dl>
+    {{/if}}
+  </header>
+
+  {{#each sections}}
+  <section class="sec" data-row="{{_p}}" data-variant="{{variant}}">
+    <h2 class="sec-title" data-bind="{{_p}}.title">{{title}}</h2>
+
+    {{#if isList}}
+    <ul class="skills" data-list="{{_p}}.items">
+      {{#each items}}<li data-row="{{_p}}" data-bind="{{_p}}.text">{{md text}}</li>
+      {{/each}}
+    </ul>
+    {{else}}
+    <div data-list="{{_p}}.entries">
+    {{#each entries}}
+    {{#unless @first}}{{#if ../isProject}}<hr class="hairline">{{/if}}{{/unless}}
+    <div class="entry" data-row="{{_p}}">
+      <div class="eh">
+        <span class="grow"><span class="{{#if ../isProject}}proj-title{{else}}org{{/if}}" data-bind="{{_p}}.org">{{org}}</span>{{#if badge}}<span class="badge" data-bind="{{_p}}.badge">{{badge}}</span>{{/if}}{{#if meta}}<span class="{{#if ../isProject}}proj-sub{{else}}role{{/if}}" data-bind="{{_p}}.meta">{{meta}}</span>{{/if}}</span>
+        {{#if when}}<span class="when" data-bind="{{_p}}.when">{{when}}</span>{{/if}}
+      </div>
+
+      {{#if facts}}
+      <div class="facts" data-list="{{_p}}.facts">
+        {{#each facts}}{{#unless @first}}<span class="sep">|</span>{{/unless}}<span class="fact" data-row="{{_p}}"><span data-bind="{{_p}}.k">{{k}}</span><span class="v" data-bind="{{_p}}.v">{{v}}</span></span>{{/each}}
+      </div>
+      {{/if}}
+
+      {{#if brief}}<div class="brief"><span class="lbl" data-bind="{{_p}}.briefLabel">{{briefLabel}}</span><span data-bind="{{_p}}.brief">{{md brief}}</span></div>{{/if}}
+
+      {{#if points}}
+      <ul class="pts" data-list="{{_p}}.points">
+        {{#each points}}<li data-row="{{_p}}" data-bind="{{_p}}.text">{{md text}}</li>
+        {{/each}}
+      </ul>
+      {{/if}}
+
+      {{#if awards}}
+      <div class="awards" data-list="{{_p}}.awards">
+        {{#each awards}}
+        <div class="aw" data-row="{{_p}}">
+          <span class="nm"><span data-bind="{{_p}}.name">{{md name}}</span>{{#if tier}} <span class="tier" data-bind="{{_p}}.tier">{{tier}}</span>{{/if}}</span>
+          {{#if when}}<span class="when" data-bind="{{_p}}.when">{{when}}</span>{{/if}}
+        </div>
+        {{/each}}
+      </div>
+      {{/if}}
+    </div>
+    {{/each}}
+    </div>
+    {{/if}}
+  </section>
+  {{/each}}
+
+</div>
+{{script}}
+</body>
+</html>
