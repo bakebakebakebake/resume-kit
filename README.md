@@ -4,6 +4,30 @@
 
 数据存在 `resume.yaml` 里，纯文本、可 diff、可回滚。工作台只是它的编辑器。
 
+## 效果一览
+
+示例图片由仓库内的 `resume-zh-demo.yaml` 和 `resume-en-demo.yaml` 实际导出；
+工作台截图展示的是同一套真实排版与导出选项。
+
+<table>
+  <thead>
+    <tr>
+      <th>中文简历导出</th>
+      <th>English resume export</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><img src="docs/images/export-zh.png" alt="中文简历导出示例：张明远的后端开发工程师简历" width="420"></td>
+      <td><img src="docs/images/export-en.png" alt="English resume export example: Alex Chen's Backend Engineer resume" width="420"></td>
+    </tr>
+  </tbody>
+</table>
+
+### 工作台
+
+<img src="docs/images/studio.png" alt="简历工作台：左侧为可直接编辑的真实简历排版，右侧可调整版式、配色、章节与导出格式" width="960">
+
 ## 上手
 
 ```bash
