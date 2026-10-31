@@ -8,6 +8,7 @@
 import { readFileSync } from 'node:fs';
 import { parse } from 'yaml';
 import { lintInline } from './markup.js';
+import { resolvePaper, PAPER_NAMES } from './paper.js';
 
 const VARIANTS = new Set(['entry', 'project', 'list']);
 
@@ -42,15 +43,37 @@ export function load(file) {
  * 因此 points / items 从裸字符串升成了 `{text, _p}`：
  * 字符串挂不住路径。
  */
+/**
+ * meta.pages 允许两种写法：正整数（期望几页）或 `auto`（不限页数）。
+ *
+ * 单页是简历的常态，所以默认 1，且默认那套 `.sheet` 是固定高度 +
+ * overflow:hidden —— 超出会被裁掉，这是有意的约束。写 auto 或大于 1 的数
+ * 就切到流式排版，纸张按内容长高、PDF 自然分页。
+ *
+ * @returns {number|'auto'}
+ */
+function parsePages(v) {
+  if (v == null) return 1;
+  if (typeof v === 'string' && v.trim().toLowerCase() === 'auto') return 'auto';
+  const n = Number(v);
+  return Number.isFinite(n) ? n : NaN;
+}
+
 function normalize(doc) {
   const meta = doc.meta ?? {};
   const profile = doc.profile ?? {};
+  const pages = parsePages(meta.pages);
 
   return {
     meta: {
       skin: meta.skin ?? 'datasheet',
       output: meta.output ?? profile.name ?? 'resume',
-      pages: Number(meta.pages ?? 1),
+      pages,
+      // 是否放开一页的硬限制。模板和探针只认这个布尔值，
+      // 免得每处都重复判断 'auto' 和数字两种形态。
+      multipage: pages === 'auto' || (Number.isFinite(pages) && pages > 1),
+      // 纸张几何：渲染、探针、DOCX、工作台视口都从这一份读
+      paper: resolvePaper(meta.paper, meta.orientation),
       lang: meta.lang ?? 'zh-CN',
       // 版式旋钮：只存跟皮肤默认值不同的那几个，空对象就是纯用皮肤的
       theme: { ...(meta.theme ?? {}) },
@@ -120,6 +143,16 @@ function normalizeSection(s, i) {
  * 存盘和重渲染之前都过一遍这个，把路径按当前顺序重排。
  */
 export function reindex(data) {
+  // 工作台切页数模式时只改 meta.pages，派生标志得跟着重算，
+  // 否则重渲染出来的还是上一次的排版模式。
+  if (data.meta) {
+    const p = parsePages(data.meta.pages);
+    data.meta.pages = p;
+    data.meta.multipage = p === 'auto' || (Number.isFinite(p) && p > 1);
+    // 工作台换纸时传回来的是纸张名，这里解析回完整几何；
+    // 已经是解析过的对象则原样放行（resolvePaper 自己认得）
+    data.meta.paper = resolvePaper(data.meta.paper, data.meta.paper?.orientation);
+  }
   data.sections.forEach((s, i) => {
     const at = `sections.${i}`;
     s._p = at;
@@ -147,8 +180,13 @@ export function lint(data) {
   const warnings = [];
 
   if (!data.profile.name) errors.push('profile.name 不能为空');
-  if (!Number.isFinite(data.meta.pages) || data.meta.pages < 1) {
-    errors.push('meta.pages 必须是不小于 1 的整数');
+  if (data.meta.pages !== 'auto' && (!Number.isFinite(data.meta.pages) || data.meta.pages < 1)) {
+    errors.push('meta.pages 必须是不小于 1 的整数，或 auto（不限页数）');
+  }
+  if (data.meta.paper && !data.meta.paper.valid) {
+    errors.push(
+      `meta.paper 不认识，可选：${PAPER_NAMES.join(' / ')}，或自定义如 210x297（毫米）。已按 A4 出图`,
+    );
   }
   if (!data.sections.length) warnings.push('sections 是空的，简历只有页头');
 

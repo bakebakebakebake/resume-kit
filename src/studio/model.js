@@ -126,5 +126,49 @@ export const isMarkupField = (path) => MARKUP_FIELDS.test(path);
 const OPTIONAL = /(\.badge|\.meta|\.when|\.tier|\.brief|profile\.seeking)$/;
 export const isOptional = (path) => OPTIONAL.test(path);
 
+/**
+ * 按 Enter 能续条的行类型：要点 / 技能。
+ * 这两种行的字段就是行本身（li 同时带 data-row 和 data-bind），
+ * 新建的空白内容直接是 { text: '' }，焦点可以立即落进去。
+ */
+export const isContinuable = (type) => type === 'point' || type === 'item';
+
+/**
+ * 行路径 → 新行创建后焦点要落的 data-bind 路径。
+ * point/item 的字段就是行本身（路径相同）；
+ * entry 落在 org；award 落在 name；fact 落在 k；contact 落在 label。
+ */
+export function focusFieldOfType(rowPath, type) {
+  switch (type) {
+    case 'point':
+    case 'item':
+      return rowPath + '.text';
+    case 'entry':
+      return rowPath + '.org';
+    case 'award':
+      return rowPath + '.name';
+    case 'fact':
+      return rowPath + '.k';
+    case 'contact':
+      return rowPath + '.label';
+    default:
+      return null;
+  }
+}
+
+/**
+ * data-bind 字段路径 → 所属 data-row 行路径。
+ * 行路径是字段路径去掉最后一段（字段名），但 point/item 的路径本身
+ * 就是 …points.N.text / …items.N.text，行路径是去掉 .text 那一段。
+ */
+export function rowPathOfField(fieldPath) {
+  // point/item: sections.S.entries.E.points.N.text → sections.S.entries.E.points.N
+  if (/\.(points|items)\.\d+\.text$/.test(fieldPath)) {
+    return fieldPath.slice(0, fieldPath.lastIndexOf('.'));
+  }
+  // 其它字段：去掉最后的 .fieldName
+  return fieldPath.slice(0, fieldPath.lastIndexOf('.'));
+}
+
 /** 深拷贝一份快照，撤销栈用 */
 export const snap = (data) => JSON.parse(JSON.stringify(data));

@@ -9,6 +9,8 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import Handlebars from 'handlebars';
 import { inline } from './markup.js';
+import { composeCss } from './page-css.js';
+import { resolvePaper } from './paper.js';
 
 /** 行内标记 helper。返回 SafeString，模板里用 {{md x}} 而不是三花括号。 */
 Handlebars.registerHelper('md', (text) => new Handlebars.SafeString(inline(text)));
@@ -42,9 +44,14 @@ export function render(data, root, opts = {}) {
   if (opts.fit) scripts.push(readFileSync(join(root, 'src', 'fit-probe.js'), 'utf8'));
   if (opts.reload) scripts.push(reloadSnippet(opts.reload));
 
+  // 直接 render（没过 normalize）的调用方也得有纸，否则基础层生成不出来
+  const paper = resolvePaper(data.meta.paper, data.meta.orientation);
+
   const html = tpl({
     ...data,
-    css: new Handlebars.SafeString(readFileSync(join(dir, 'style.css'), 'utf8')),
+    css: new Handlebars.SafeString(
+      composeCss(readFileSync(join(dir, 'style.css'), 'utf8'), paper),
+    ),
     // 主题覆盖必须排在皮肤 CSS 后面：同名自定义属性靠先后顺序决胜，
     // 后写的赢。所以模板里 {{themeStyle}} 紧跟在 </style> 之后。
     themeStyle: new Handlebars.SafeString(themeStyle(data.meta.theme)),

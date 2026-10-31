@@ -25,6 +25,10 @@
     const sheet = document.querySelector('.sheet');
     if (!sheet) return null;
 
+    // 不限页数：纸张按内容长高，"超出纸面"这个概念不成立。
+    // 这时候有用的信息变成了"要占几页、最后一页剩多少"。
+    const multipage = document.documentElement.dataset.pages === 'auto';
+
     const box = sheet.getBoundingClientRect();
     const padBottom = parseFloat(getComputedStyle(sheet).paddingBottom) || 0;
     // 正常情况下内容不该越过这条线
@@ -41,10 +45,34 @@
       }
     }
 
+    if (multipage) {
+      // 纸高由渲染时写进 <html data-page-mm>，探针不该自己假定 A4
+      const PAGE = (parseFloat(document.documentElement.dataset.pageMm) || 297) * PX_PER_MM;
+      const used = deepest - box.top;
+      const pages = Math.max(1, Math.ceil(used / PAGE - 0.001));
+      return {
+        multipage: true,
+        // 多页模式下不裁内容，这两个标志恒为假，
+        // 让上层的判断逻辑不用分情况写。
+        clipMm: 0,
+        clipped: false,
+        intoPadMm: 0,
+        tight: false,
+        pages,
+        // 最后一页还剩多少空白，用来判断"要不要再压一压省一页"
+        freeMm: mm(pages * PAGE - used),
+        last: describe(culprit),
+        contentMm: mm(sheet.scrollHeight),
+        pageMm: mm(PAGE),
+      };
+    }
+
     const clipPx = deepest - box.bottom;
     const intoPadPx = deepest - contentLimit;
 
     return {
+      multipage: false,
+      pages: 1,
       // 纸面外：真丢内容
       clipMm: mm(clipPx),
       clipped: clipPx > 0.5,
@@ -54,14 +82,17 @@
       // 还剩多少可用高度（负数 = 已经超了）
       freeMm: mm(contentLimit - deepest),
       // 最靠底的元素，方便定位是哪一段撑爆的
-      last: culprit
-        ? `${culprit.tagName.toLowerCase()}${culprit.className ? '.' + String(culprit.className).trim().split(/\s+/).join('.') : ''}`
-        : null,
+      last: describe(culprit),
       // 备查：整体内容高 vs 纸张高
       contentMm: mm(sheet.scrollHeight),
       pageMm: mm(box.height),
     };
   }
+
+  const describe = (el) =>
+    el
+      ? `${el.tagName.toLowerCase()}${el.className ? '.' + String(el.className).trim().split(/\s+/).join('.') : ''}`
+      : null;
 
   // 等字体，但不无限等：字体走 CDN 又断网时 fonts.ready 会挂很久，
   // 那种情况下也得把数量出来，只是标记一下"字体没就位，数字仅供参考"。
@@ -86,7 +117,9 @@
     if (!fontsReady) {
       console.warn('[resume-kit] 字体没加载完就量了，尺寸不准；跑 `npm run fonts` 把字体本地化');
     }
-    if (fit.clipped) {
+    if (fit.multipage) {
+      console.info(`[resume-kit] 不限页数：约 ${fit.pages} 页，末页还剩 ${fit.freeMm}mm`);
+    } else if (fit.clipped) {
       console.warn(`[resume-kit] 内容超出纸面 ${fit.clipMm}mm，末尾会被裁掉（最底部：${fit.last}）`);
     } else if (fit.tight) {
       console.warn(`[resume-kit] 内容压进底部留白 ${fit.intoPadMm}mm，没丢内容但页脚偏紧`);

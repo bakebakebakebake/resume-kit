@@ -100,9 +100,10 @@ body{
     radial-gradient(ellipse at 50% 0%,#1E2226 0%,var(--bg) 62%);
 }
 .paper-hold{
-  /* 只露出 A4 那一块：794×1123 是 210×297mm 在 96dpi 下的 CSS 像素数。 */
-  width:794px;
-  height:1123px;
+  /* 只露出纸那一块。尺寸由 editor.js 按当前纸张写进这两个变量
+     （--paper-w/h），换纸时跟着变；这里的值只是首屏 A4 的兜底。 */
+  width:var(--paper-w,794px);
+  height:var(--paper-h,1123px);
   flex:none;
   box-shadow:0 1px 2px rgba(0,0,0,.5),0 12px 34px rgba(0,0,0,.42);
   border-radius:2px;
@@ -111,14 +112,19 @@ body{
   position:relative;
 }
 /*
- * iframe 故意开到 900px 宽 —— 比纸还宽。
+ * iframe 故意比纸宽 —— 见 --frame-w。
  *
- * A4 在 96dpi 下正好 793.7px，比皮肤里 max-width:820px 那道窄屏断点还窄；
- * 按纸的尺寸给 iframe，命中的是给手机准备的那套规则（height:auto、正文 11pt），
+ * 纸宽在 96dpi 下比皮肤的窄屏断点还窄；按纸的尺寸给 iframe，
+ * 命中的是给手机准备的那套规则（height:auto、正文 11pt），
  * 排版和量出来的高度全是错的。所以给足宽度走桌面规则，
  * 多出来的边由 .paper-hold 裁掉，位置在 alignPaper() 里按实测对齐。
  */
-#paper{position:absolute;top:0;left:0;width:900px;height:1123px;border:0;display:block}
+#paper{
+  position:absolute;top:0;left:0;
+  width:var(--frame-w,900px);
+  height:var(--paper-h,1123px);
+  border:0;display:block;
+}
 .stage-foot{padding:16px 0 26px}
 
 /* ── 右侧面板 ── */

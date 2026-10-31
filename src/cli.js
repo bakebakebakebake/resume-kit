@@ -81,11 +81,14 @@ function buildHtml(data, { fit = true, reload = 0 } = {}) {
 function reportFit(fit, pages, want) {
   if (!fit) {
     console.warn(`${C.yellow('warn')} 没取到尺寸数据，跳过排版检查`);
+  } else if (fit.multipage) {
+    console.log(`${C.dim(`分页  约 ${fit.pages} 页，末页还剩 ${fit.freeMm}mm`)}`);
   } else if (fit.clipped) {
     console.error(
       `${C.red('内容被裁')} 超出纸面 ${fit.clipMm}mm，末尾内容不会出现在 PDF 里。\n` +
         `          最靠底的元素：${fit.last}\n` +
-        `          删点内容，或把 skins/*/style.css 里的 --fs / --lh 调小。`,
+        `          删点内容，或把 skins/*/style.css 里的 --fs / --lh 调小，\n` +
+        `          也可以在 meta.pages 写 auto 放开一页的限制。`,
     );
   } else if (fit.tight) {
     console.warn(
@@ -94,7 +97,8 @@ function reportFit(fit, pages, want) {
   } else {
     console.log(`${C.dim(`留白  还剩 ${fit.freeMm}mm 可用`)}`);
   }
-  if (pages != null && pages !== want) {
+  // want 是 auto 时页数本来就不固定，没有"对不上"这回事
+  if (pages != null && want !== 'auto' && pages !== want) {
     console.warn(`${C.yellow('warn')} 导出 ${pages} 页，meta.pages 写的是 ${want}`);
   }
   return !!fit?.clipped;
@@ -114,7 +118,9 @@ async function main() {
       warnMissingFonts();
       const p = buildHtml(data);
       console.log(`${C.green('✓')} ${p}`);
-      if (!opts['no-check']) reportFit(await probeFit(p), null, data.meta.pages);
+      if (!opts['no-check']) {
+        reportFit(await probeFit(p, { paper: data.meta.paper }), null, data.meta.pages);
+      }
       break;
     }
 
@@ -125,7 +131,11 @@ async function main() {
       const pdfPath = join(outDir, `${data.meta.output}.pdf`);
       const pages = await toPdf(htmlPath, pdfPath);
       console.log(`${C.green('✓')} ${pdfPath}${pages ? C.dim(`  (${pages} 页)`) : ''}`);
-      const clipped = reportFit(await probeFit(htmlPath), pages, data.meta.pages);
+      const clipped = reportFit(
+        await probeFit(htmlPath, { paper: data.meta.paper }),
+        pages,
+        data.meta.pages,
+      );
       // 内容被裁是硬错误：PDF 生成了但内容不完整，退出码要能被 CI / 脚本感知
       if (clipped && !opts['allow-clip']) process.exit(2);
       break;

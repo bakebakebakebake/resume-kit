@@ -9,11 +9,15 @@
  */
 
 import { writeFileSync, mkdtempSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
-import { load } from './data.js';
+import { fileURLToPath } from 'node:url';
+import { load, lint, reindex } from './data.js';
 import { emitYaml } from './emit-yaml.js';
-import { inline, tokens } from './markup.js';
+import { render } from './render.js';
+import { inline, tokens, lintInline } from './markup.js';
+
+const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
 let pass = 0;
 let fail = 0;
@@ -63,11 +67,11 @@ export function runTests(dataFile) {
     '三段拆开',
     JSON.stringify(t1) ===
       JSON.stringify([
-        { text: '普通 ', bold: false, code: false },
-        { text: '粗', bold: true, code: false },
-        { text: ' 再 ', bold: false, code: false },
-        { text: '码', bold: false, code: true },
-        { text: ' 尾', bold: false, code: false },
+        { text: '普通 ', bold: false, code: false, href: null },
+        { text: '粗', bold: true, code: false, href: null },
+        { text: ' 再 ', bold: false, code: false, href: null },
+        { text: '码', bold: false, code: true, href: null },
+        { text: ' 尾', bold: false, code: false, href: null },
       ]),
     JSON.stringify(t1),
   );
@@ -83,6 +87,151 @@ export function runTests(dataFile) {
       .map((x) => x.text)
       .join('') === 'a b c d',
   );
+
+  console.log('\n链接');
+  ok(
+    '基本链接',
+    inline('见 [主页](https://a.com)') === '见 <a class="lk" href="https://a.com">主页</a>',
+    inline('见 [主页](https://a.com)'),
+  );
+  ok(
+    '链接地址里的 & 被转义',
+    inline('[x](https://a.com/?a=1&b=2)').includes('a=1&amp;b=2'),
+    inline('[x](https://a.com/?a=1&b=2)'),
+  );
+  ok(
+    'javascript: 不产出链接',
+    !inline('[x](javascript:alert(1))').includes('<a'),
+    inline('[x](javascript:alert(1))'),
+  );
+  ok('转义方括号', inline('\\[不是链接\\](x)') === '[不是链接](x)', inline('\\[不是链接\\](x)'));
+  ok('mailto 放行', inline('[信](mailto:a@b.com)').includes('href="mailto:a@b.com"'));
+
+  // 曾经的 bug：tokens() 顺次切分时先切粗体，会把链接的方括号和圆括号
+  // 劈到两个片段里，Word 里这个链接就整个丢了。
+  const t3 = tokens('[**粗** 尾](https://a.com)');
+  ok(
+    '链接里的粗体不会把链接切断',
+    t3.length === 2 && t3.every((x) => x.href === 'https://a.com') && t3[0].bold && !t3[1].bold,
+    JSON.stringify(t3),
+  );
+  ok(
+    '两种写法的嵌套都认',
+    tokens('**[x](https://a.com)**')[0]?.href === 'https://a.com' &&
+      tokens('[`x`](https://a.com)')[0]?.code === true,
+  );
+  ok(
+    '不安全地址在片段里也退回文字',
+    tokens('[x](javascript:1)').every((x) => x.href === null),
+    JSON.stringify(tokens('[x](javascript:1)')),
+  );
+  ok(
+    'lint 抓出没配成链接的方括号',
+    lintInline('见 [主页(https://a.com)').length === 1,
+    JSON.stringify(lintInline('见 [主页(https://a.com)')),
+  );
+  ok('lint 不误报正常链接', lintInline('见 [主页](https://a.com) 和 **粗**').length === 0);
+
+  console.log('\n页数模式');
+  {
+    // 曾经的 bug：工作台把开关写在 meta.pageLimit 上，而 normalize / emitYaml
+    // 都不认识这个键 —— 存盘即丢失，也从来没传到导出那一侧。
+    const f = join(tmp, 'pages.yaml');
+    const src = 'meta:\n  skin: datasheet\n  output: x\n  pages: auto\nprofile:\n  name: 张三\nsections:\n  - title: A\n    entries:\n      - org: O\n';
+    writeFileSync(f, src, 'utf8');
+
+    const d = load(f);
+    ok('auto 解析成 auto', d.meta.pages === 'auto', JSON.stringify(d.meta.pages));
+    ok('auto 推出 multipage', d.meta.multipage === true);
+    ok('auto 不算错误', lint(d).errors.length === 0, JSON.stringify(lint(d).errors));
+
+    const f2 = join(tmp, 'pages2.yaml');
+    writeFileSync(f2, emitYaml(d), 'utf8');
+    const d2 = load(f2);
+    ok('auto 存盘后还在', d2.meta.pages === 'auto', JSON.stringify(d2.meta.pages));
+    ok('auto 二次序列化稳定', emitYaml(d2) === emitYaml(d));
+
+    const f3 = join(tmp, 'pages3.yaml');
+    writeFileSync(f3, src.replace('pages: auto', 'pages: 1'), 'utf8');
+    const d3 = load(f3);
+    ok('默认单页不进多页模式', d3.meta.pages === 1 && d3.meta.multipage === false);
+
+    // 工作台切换走的是这条路：只改 meta.pages，派生位靠 reindex 重算
+    d3.meta.pages = 'auto';
+    reindex(d3);
+    ok('reindex 重算派生位', d3.meta.multipage === true);
+    d3.meta.pages = 1;
+    reindex(d3);
+    ok('切回单页也重算', d3.meta.multipage === false);
+
+    const f4 = join(tmp, 'pages4.yaml');
+    writeFileSync(f4, src.replace('pages: auto', 'pages: 呵呵'), 'utf8');
+    ok('非法页数报错', lint(load(f4)).errors.some((e) => e.includes('meta.pages')));
+
+    // multipage 必须真的传到模板，否则 CSS 里那套 data-pages 规则永远不生效。
+    // 只看 <html> 开标签：皮肤 CSS 里也有 data-pages 选择器，
+    // 直接在整份 HTML 里搜字符串会永远命中。
+    const htmlTag = (d) => render(d, ROOT, {}).match(/<html[^>]*>/)[0];
+    ok(
+      'multipage 落到 <html>',
+      htmlTag(load(f)).includes('data-pages="auto"') && !htmlTag(d3).includes('data-pages'),
+      `${htmlTag(load(f))} / ${htmlTag(d3)}`,
+    );
+  }
+
+  console.log('\n纸张');
+  {
+    const head = 'meta:\n  skin: datasheet\n  output: x\n';
+    const tail = 'profile:\n  name: 张三\nsections:\n  - title: A\n    entries:\n      - org: O\n';
+    const write = (name, metaExtra) => {
+      const f = join(tmp, name);
+      writeFileSync(f, `${head}${metaExtra}${tail}`, 'utf8');
+      return load(f);
+    };
+
+    ok('不写就是 A4', write('p-def.yaml', '').meta.paper.w === 210);
+
+    const lt = write('p-letter.yaml', '  paper: Letter\n');
+    ok('Letter 解析成 215.9×279.4', lt.meta.paper.w === 215.9 && lt.meta.paper.h === 279.4);
+    ok('关键字纸张用 CSS 关键字', lt.meta.paper.cssSize === 'letter', lt.meta.paper.cssSize);
+
+    const cus = write('p-custom.yaml', '  paper: 120x200\n');
+    ok('自定义尺寸认得', cus.meta.paper.w === 120 && cus.meta.paper.h === 200);
+    ok('自定义尺寸落到 mm', cus.meta.paper.cssSize === '120mm 200mm', cus.meta.paper.cssSize);
+
+    const ls = write('p-ls.yaml', '  paper: A4\n  orientation: landscape\n');
+    ok('横向把宽高换过来', ls.meta.paper.w === 297 && ls.meta.paper.h === 210);
+
+    const bad = write('p-bad.yaml', '  paper: 手帕\n');
+    ok('认不出的纸报错', lint(bad).errors.some((e) => e.includes('meta.paper')));
+    ok('认不出也兜回 A4 能出图', bad.meta.paper.w === 210);
+
+    // 曾经的 bug：emitYaml 不写 meta.paper，工作台存一次盘
+    // 用户选的纸就被静默换回 A4。
+    for (const [name, extra, check] of [
+      ['letter', '  paper: Letter\n', (d) => d.meta.paper.name === 'Letter'],
+      ['custom', '  paper: 120x200\n', (d) => d.meta.paper.w === 120 && d.meta.paper.h === 200],
+      ['landscape', '  paper: A4\n  orientation: landscape\n', (d) => d.meta.paper.w === 297],
+    ]) {
+      const d = write(`p-rt-${name}.yaml`, extra);
+      const f = join(tmp, `p-rt-${name}-2.yaml`);
+      writeFileSync(f, emitYaml(d), 'utf8');
+      const d2 = load(f);
+      ok(`${name} 存盘后还在`, check(d2), emitYaml(d).split('\n').slice(-99).join('\n').match(/^ {2}(paper|orientation):.*$/m)?.[0] ?? '没写出来');
+      ok(`${name} 二次序列化稳定`, emitYaml(d2) === emitYaml(d));
+    }
+
+    // 纸张必须真的传到 CSS 和探针，否则换纸只是改了个数字
+    const css = (d) => render(d, ROOT, {});
+    ok('纸张尺寸落到 @page', css(lt).includes('@page{size:letter;margin:0}'));
+    ok('纸高落到 data-page-mm', css(lt).match(/<html[^>]*>/)[0].includes('data-page-mm="279.4"'));
+    ok(
+      '窄屏断点跟着纸走',
+      css(lt).includes('max-width:842px') && css(write('p-a4.yaml', '')).includes('max-width:820px'),
+    );
+    // @import 被基础层挤到后面就整条失效，中日韩字体静默回落到系统字体
+    ok('@import 仍在样式表最前', /<style>\s*@import/.test(css(lt)));
+  }
 
   console.log('\nYAML 往返');
   const a = load(dataFile);

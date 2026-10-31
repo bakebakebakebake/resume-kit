@@ -7,7 +7,7 @@
  * 这些编辑期的装饰不可能漏进产物。
  */
 
-import { getAt, isMarkupField, isOptional, rowType, label } from './model.js';
+import { getAt, isMarkupField, isOptional, isContinuable, focusFieldOfType, rowPathOfField, rowType, label } from './model.js';
 
 /** 注入到 iframe 里的编辑期样式 */
 const EDIT_CSS = `
@@ -70,10 +70,11 @@ const EDIT_CSS = `
 /**
  * @param {HTMLIFrameElement} frame
  * @param {object} ctx
- * @param {() => object} ctx.data          取当前数据
- * @param {(path, value) => void} ctx.onEdit    某个字段改了
+ * @param {() => object} ctx.data              取当前数据
+ * @param {(path, value) => void} ctx.onEdit   某个字段改了
  * @param {(act, rowPath, extra) => void} ctx.onStructure  加/删/移
- * @param {(rect|null) => void} ctx.onSelect    选中范围变了（格式条跟着走）
+ * @param {(rect|null) => void} ctx.onSelect   选中范围变了（格式条跟着走）
+ * @param {() => void} ctx.onSave              触发保存
  */
 export function mount(frame, ctx) {
   const doc = frame.contentDocument;
@@ -101,7 +102,7 @@ export function mount(frame, ctx) {
     beginEdit(el);
   });
 
-  function beginEdit(el) {
+  function beginEdit(el, caretAt = 'end') {
     const path = el.dataset.bind;
     const raw = isMarkupField(path);
     el.dataset.before = raw ? String(getAt(ctx.data(), path) ?? '') : el.textContent;
@@ -116,10 +117,14 @@ export function mount(frame, ctx) {
     el.spellcheck = false;
     el.focus();
 
-    // 光标落到末尾，而不是选中全部：改一个字比重打一遍常见
     const r = doc.createRange();
     r.selectNodeContents(el);
-    r.collapse(false);
+    if (caretAt === 'start') {
+      r.collapse(true);
+    } else {
+      // 末尾：改一个字比重打一遍常见
+      r.collapse(false);
+    }
     const sel = win.getSelection();
     sel.removeAllRanges();
     sel.addRange(r);
@@ -171,19 +176,93 @@ export function mount(frame, ctx) {
 
   doc.addEventListener('keydown', (e) => {
     if (!editing) return;
+    const path = editing.dataset.bind;
+    const rowPath = editing.closest('[data-row]')?.dataset.row;
+    const type = rowPath ? rowType(rowPath) : null;
+
+    // ── Escape：取消编辑 ──
     if (e.key === 'Escape') {
       e.preventDefault();
       cancel(editing);
-    } else if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      commit(editing);
-    } else if ((e.metaKey || e.ctrlKey) && (e.key === 'b' || e.key === 'e')) {
-      e.preventDefault();
-      wrapSelection(e.key === 'b' ? '**' : '`');
-    } else if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+      return;
+    }
+
+    // ── ⌘S：提交并保存 ──
+    if ((e.metaKey || e.ctrlKey) && e.key === 's') {
       e.preventDefault();
       commit(editing);
       ctx.onSave();
+      return;
+    }
+
+    // ── ⌘B / ⌘E：标记包裹 ──
+    if ((e.metaKey || e.ctrlKey) && (e.key === 'b' || e.key === 'e')) {
+      e.preventDefault();
+      wrapSelection(e.key === 'b' ? '**' : '`');
+      return;
+    }
+
+    // ── ⌥↑ / ⌥↓：移动当前行 ──
+    if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown') && rowPath) {
+      e.preventDefault();
+      const sibs = siblings(doc, rowPath);
+      const idx = sibs.findIndex((s) => s.dataset.row === rowPath);
+      const to = e.key === 'ArrowUp' ? idx - 1 : idx + 1;
+      if (to < 0 || to >= sibs.length) return;
+      // 提交当前编辑，焦点跨重渲染恢复由 editor.js 的 pendingFocus 处理
+      commit(editing);
+      ctx.onStructure('move', rowPath, { to, focusPath: path });
+      return;
+    }
+
+    // ── Enter：提交；在可续条的行还要插一条新行并进入编辑 ──
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      if (isContinuable(type) && rowPath) {
+        commit(editing);
+        // 告知上层：在 rowPath 下方加一行，然后把焦点给新行的 text 字段
+        ctx.onStructure('add', rowPath, { focusNew: true });
+      } else {
+        commit(editing);
+      }
+      return;
+    }
+
+    // ── Backspace 在空的可续条行：删行，焦点回上一条末尾 ──
+    if (e.key === 'Backspace' && isContinuable(type) && rowPath) {
+      const cur = editing.textContent.replace(/ /g, ' ').trim();
+      if (cur !== '') return; // 有内容不拦截
+      e.preventDefault();
+
+      const sibs = siblings(doc, rowPath);
+      const idx = sibs.findIndex((s) => s.dataset.row === rowPath);
+      // 只有一条时不删（空内容会触发重渲染让它消失，那才是用户想要的）
+      if (sibs.length <= 1) return;
+
+      // 找上一条的 data-bind 元素（sibs[idx-1] 本身就是 data-bind，或第一个子 [data-bind]）
+      const prevRow = sibs[idx > 0 ? idx - 1 : 0];
+      const prevBind = prevRow.matches('[data-bind]')
+        ? prevRow
+        : prevRow.querySelector('[data-bind]');
+      const prevPath = prevBind?.dataset.bind ?? null;
+
+      cancel(editing); // 先清空编辑状态，免得 commit 把空值写进去
+      ctx.onStructure('del', rowPath, { focusPath: prevPath, focusCaret: 'end' });
+      return;
+    }
+
+    // ── Tab / ⇧Tab：在 data-bind 字段之间跳 ──
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const all = [...doc.querySelectorAll('[data-bind]')];
+      const idx = all.indexOf(editing);
+      if (idx === -1) return;
+      commit(editing);
+      const next = e.shiftKey
+        ? all[(idx - 1 + all.length) % all.length]
+        : all[(idx + 1) % all.length];
+      if (next) beginEdit(next, 'end');
+      return;
     }
   });
 
@@ -275,7 +354,6 @@ export function mount(frame, ctx) {
 
     const t = rowType(row.dataset.row);
     rail.querySelector('.lbl').textContent = label(t);
-    // 联系方式和数据条太窄，塞不下拖动手柄，只留加和删
     rail.querySelector('[data-act="drag"]').style.display = '';
 
     const r = row.getBoundingClientRect();
@@ -351,9 +429,22 @@ export function mount(frame, ctx) {
     doc.addEventListener('pointerup', onUp);
   });
 
+  // ── 公开接口 ──
   return {
     /** 上层要保存时，先把正在编辑的那格落进数据 */
     flush: () => editing && commit(editing),
+
+    /**
+     * 跨重渲染恢复焦点。由 editor.js 在 rerender 后调用。
+     * @param {string} path  data-bind 路径
+     * @param {'start'|'end'} [caret] 光标位置，默认末尾
+     */
+    focusPath(path, caret = 'end') {
+      const el = doc.querySelector(`[data-bind="${CSS.escape(path)}"]`);
+      if (!el) return false;
+      beginEdit(el, caret);
+      return true;
+    },
   };
 }
 

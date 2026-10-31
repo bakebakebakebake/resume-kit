@@ -27,6 +27,16 @@ function crc32(buf) {
   return (c ^ -1) >>> 0;
 }
 
+/**
+ * 外部属性的高 16 位是 Unix 权限位（因为"打包工具版本"高字节声明了 Unix）。
+ * 这里必须写实际权限：留 0 的话解出来是 `----------`，
+ * Word 不在乎，但谁想解开 docx 看一眼都会撞上"权限不足"。
+ *
+ * `>>> 0` 不能省：左移 16 位后最高位是 1，JS 的位运算按有符号 32 位算，
+ * 直接拿去 writeUInt32LE 会因为是负数被拒。
+ */
+const UNIX_MODE_644 = (0o100644 << 16) >>> 0;
+
 /** ZIP 用的是 MS-DOS 时间格式：日期和时间各挤在一个 16 位里 */
 function dosTime(d = new Date()) {
   const time = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
@@ -84,7 +94,7 @@ export function zip(entries) {
     central.writeUInt16LE(0, 32); // 注释长
     central.writeUInt16LE(0, 34); // 磁盘号
     central.writeUInt16LE(0, 36); // 内部属性
-    central.writeUInt32LE(0, 38); // 外部属性
+    central.writeUInt32LE(UNIX_MODE_644, 38); // 外部属性：Unix 0644
     central.writeUInt32LE(offset, 42); // 本地头偏移
     name.copy(central, 46);
 

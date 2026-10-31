@@ -15,6 +15,18 @@ import { buildKnobs, buildSectionList } from './knobs.js';
 const $ = (id) => document.getElementById(id);
 const frame = $('paper');
 
+/**
+ * 跨重渲染焦点恢复。两种形式：
+ *   { path: string, caret }
+ *     稳定路径，直接用（del 退格时前一行路径不变）
+ *   { arrPath: string, index: number, fieldSuffix: string, caret }
+ *     按数组位置找（add/move 后新位置的路径在重渲染前未知）
+ */
+const FOCUS_SUFFIX = {
+  point: '.text', item: '.text', entry: '.org',
+  award: '.name', fact: '.k', contact: '.label',
+};
+
 const S = {
   data: null,
   defaults: {},
@@ -25,7 +37,24 @@ const S = {
   dirty: false,
   paper: null,
   lastEdit: { path: null, at: 0 },
-  pageLimit: true, // 默认限制一页
+  pendingFocus: null,
+};
+
+function applyPaperSize() {
+  const p = S.data?.meta?.paper;
+  if (!p?.w) return;
+  const PX_PER_MM = 96 / 25.4;
+  const w = Math.round(p.w * PX_PER_MM);
+  const h = Math.round(p.h * PX_PER_MM);
+  const st = document.documentElement.style;
+  st.setProperty('--paper-w', `${w}px`);
+  st.setProperty('--paper-h', `${h}px`);
+  st.setProperty('--frame-w', `${w + 106}px`);
+}
+
+const isMultipage = () => {
+  const p = S.data?.meta?.pages;
+  return p === 'auto' || (typeof p === 'number' && p > 1);
 };
 
 // ── 启动 ──
@@ -41,7 +70,6 @@ async function boot() {
     S.defaults = b.defaults;
     S.skins = b.skins;
     S.dataFile = b.dataFile;
-    S.pageLimit = b.data.meta.pageLimit !== false; // 默认 true
 
     $('file-name').textContent = b.dataFile.replace(/^.*\/(?=[^/]*$)/, '');
     $('file-name').title = b.dataFile;
@@ -64,6 +92,7 @@ let renderSeq = 0;
 async function rerender() {
   const seq = ++renderSeq;
   setFit('busy', '重排…');
+  applyPaperSize();
   const r = await fetch('/api/render', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -75,7 +104,7 @@ async function rerender() {
     return;
   }
   const html = await r.text();
-  if (seq !== renderSeq) return; // 有更新的一次在跑，这次丢掉
+  if (seq !== renderSeq) return;
 
   await new Promise((ok) => {
     frame.addEventListener('load', ok, { once: true });
@@ -96,28 +125,47 @@ async function rerender() {
 
   applyTheme();
   applyPageLimit();
+
+  // ── 跨重渲染焦点恢复 ──
+  if (S.pendingFocus) {
+    const pf = S.pendingFocus;
+    S.pendingFocus = null;
+
+    if (pf.path) {
+      // 稳定路径（del 退格时前一行下标不变）
+      S.paper?.focusPath(pf.path, pf.caret ?? 'end');
+    } else if (pf.arrPath != null) {
+      // 按数组位置找（add 新行、move 后新位置）
+      const doc = frame.contentDocument;
+      const prefix = pf.arrPath + '.';
+      const sibs = [...doc.querySelectorAll('[data-row]')].filter((el) => {
+        const p = el.dataset.row;
+        return p.startsWith(prefix) && !p.slice(prefix.length).includes('.');
+      });
+      const targetRow = sibs[pf.index];
+      if (targetRow) {
+        const fieldPath = targetRow.dataset.row + (pf.fieldSuffix ?? '');
+        S.paper?.focusPath(fieldPath, pf.caret ?? 'end');
+        // 确保新行在可视区
+        targetRow.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
+      }
+    }
+  }
+
   await measure();
 }
 
-/**
- * 把 iframe 挪到"只看见纸"的位置。
- *
- * iframe 比纸宽（见 chrome.css 里那段），皮肤又会用 body 的 padding
- * 和 margin:auto 把纸居中，偏移量因皮肤而异 —— 所以不写死，直接量。
- */
 function alignPaper() {
   const doc = frame.contentDocument;
   const sheet = doc?.querySelector('.sheet');
   if (!sheet) return;
-  // 先撑高，免得 iframe 自己长出竖滚动条：有滚动条会吃掉宽度，
-  // 宽度一掉回 820px 以下就又踩回窄屏规则了。
-  frame.style.height = `${Math.max(1123, doc.documentElement.scrollHeight)}px`;
+  const minH = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--paper-h'), 10) || 1123;
+  frame.style.height = `${Math.max(minH, doc.documentElement.scrollHeight)}px`;
   const r = sheet.getBoundingClientRect();
   frame.style.left = `${-Math.round(r.left)}px`;
   frame.style.top = `${-Math.round(r.top)}px`;
 }
 
-/** 量排版。探针自己会等字体，这里跟着它的 promise 走。 */
 async function measure() {
   const win = frame.contentWindow;
   if (!win) return;
@@ -133,10 +181,11 @@ async function measure() {
 function showFit(fit) {
   if (!fit) return setFit('idle', '量不出来');
   const caveat = fit.fontsReady ? '' : '（字体未就位，数字仅供参考）';
+  if (fit.multipage) {
+    return setFit('ok', `约 ${fit.pages} 页，末页还剩 ${fit.freeMm}mm${caveat}`);
+  }
   if (fit.clipped) return setFit('clipped', `超出一页 ${fit.clipMm}mm，末尾会被裁掉${caveat}`);
   if (fit.tight) return setFit('tight', `压进下边距 ${fit.intoPadMm}mm，没丢内容${caveat}`);
-  // freeMm 可能是 -0.1 这种量级：探针的阈值是 0.5mm，够不上"偏紧"，
-  // 但显示成"还剩 -0.1mm"是句废话，直接说刚好。
   if (fit.freeMm <= 0.5) return setFit('ok', `正好一页，没有余量${caveat}`);
   setFit('ok', `还剩 ${fit.freeMm}mm${caveat}`);
 }
@@ -149,7 +198,6 @@ function setFit(state, text) {
 
 // ── 编辑 ──
 
-/** 改一个字段。同一格连续改只压一个撤销点，不然撤销要按几十下。 */
 function applyEdit(path, value) {
   const now = Date.now();
   const same = S.lastEdit.path === path && now - S.lastEdit.at < 1500;
@@ -159,7 +207,6 @@ function applyEdit(path, value) {
   setAt(S.data, path, value === '' && isOptional(path) ? null : value);
   markDirty();
 
-  // 章节标题变了，右边列表跟着变
   if (/^sections\.\d+\.title$/.test(path)) refreshSections();
 }
 
@@ -176,12 +223,20 @@ async function applyStructure(act, rowPath, extra = {}) {
     const fresh = blank(loc.type);
     if (!fresh) return;
     loc.arr.splice(loc.index + 1, 0, fresh);
+    if (extra.focusNew) {
+      // 新行在 loc.index+1，等重渲染后按 DOM 位置找到它再聚焦
+      S.pendingFocus = {
+        arrPath: loc.arrPath,
+        index: loc.index + 1,
+        fieldSuffix: FOCUS_SUFFIX[loc.type] ?? '',
+        caret: 'end',
+      };
+    }
     toast(`加了${q}${label(loc.type)}`);
   }
 
   if (act === 'del') {
     if (loc.arr.length === 1 && loc.type !== 'section') {
-      // 删到空数组会让整段消失，多半不是本意
       const gone = loc.arr[0];
       const nm = gone.text ?? gone.org ?? gone.name ?? gone.title ?? '';
       if (!confirm(`这是最后${q}${label(loc.type)}（${String(nm).slice(0, 20)}），删掉整段会一起消失。继续？`)) {
@@ -190,12 +245,25 @@ async function applyStructure(act, rowPath, extra = {}) {
       }
     }
     loc.arr.splice(loc.index, 1);
+    // 退格删空行：前一行路径下标不变，直接用稳定路径
+    if (extra.focusPath) {
+      S.pendingFocus = { path: extra.focusPath, caret: extra.focusCaret ?? 'end' };
+    }
     toast(`删了${q}${label(loc.type)}`);
   }
 
   if (act === 'move') {
     const [row] = loc.arr.splice(loc.index, 1);
     loc.arr.splice(extra.to, 0, row);
+    // ⌥↑↓ 移行：目标位置是 extra.to，fieldSuffix 从旧路径截取
+    if (extra.focusPath != null) {
+      S.pendingFocus = {
+        arrPath: loc.arrPath,
+        index: extra.to,
+        fieldSuffix: extra.focusPath.slice(rowPath.length), // e.g. '.text', '.org', ''
+        caret: 'end',
+      };
+    }
   }
 
   markDirty();
@@ -301,10 +369,6 @@ function refreshKnobs() {
   });
 }
 
-/**
- * 主题直接写到 iframe 的 documentElement 上。
- * 拖滑块时不走服务端 —— CSS 变量就是干这个的,每帧发一次 HTTP 会卡死。
- */
 function applyTheme() {
   const root = frame.contentDocument?.documentElement;
   if (!root) return;
@@ -314,29 +378,21 @@ function applyTheme() {
   }
 }
 
-/** 应用页面限制：开启时固定 297mm 会裁剪，关闭时 auto 高度不裁剪 */
 function applyPageLimit() {
-  const doc = frame.contentDocument;
-  if (!doc) return;
-  const sheet = doc.querySelector('.sheet');
-  if (!sheet) return;
-  if (S.pageLimit) {
-    sheet.style.height = '297mm';
-    sheet.style.overflow = 'hidden';
-  } else {
-    sheet.style.height = 'auto';
-    sheet.style.overflow = 'visible';
-  }
+  const root = frame.contentDocument?.documentElement;
+  if (!root) return;
+  if (isMultipage()) root.dataset.pages = 'auto';
+  else delete root.dataset.pages;
 }
 
 function refreshPageLimitButton() {
   const btn = $('btn-page-limit');
-  if (S.pageLimit) {
+  if (!isMultipage()) {
     btn.textContent = '📄 限制一页';
-    btn.title = '当前：超出会被裁掉。点击切换到多页模式';
+    btn.title = '当前：超出会被裁掉。点击切换到多页模式（meta.pages: auto）';
   } else {
     btn.textContent = '📄 不限页数';
-    btn.title = '当前：内容可以超过一页。点击切换回单页限制';
+    btn.title = '当前：内容可以超过一页，按内容分页。点击切换回单页限制';
   }
 }
 
@@ -357,7 +413,6 @@ function fillSkins() {
   sel.addEventListener('change', async () => {
     pushUndo();
     S.data.meta.skin = sel.value;
-    // 换皮肤要重取默认值：旋钮范围和配色都是跟着皮肤的
     const r = await fetch('/api/boot');
     const b = await r.json();
     S.defaults = b.defaults;
@@ -376,12 +431,10 @@ function refreshSections() {
       setTimeout(() => el?.classList.remove('sk-hot'), 900);
     },
     onVariant: async (i) => {
-      // entry → project → list 循环切
       const order = ['entry', 'project', 'list'];
       const s = S.data.sections[i];
       pushUndo();
       s.variant = order[(order.indexOf(s.variant) + 1) % order.length];
-      // list 用 items，其它用 entries，切过去时补一条免得空白
       if (s.variant === 'list' && !s.items?.length) s.items = [blank('item')];
       if (s.variant !== 'list' && !s.entries?.length) s.entries = [blank('entry')];
       markDirty();
@@ -449,7 +502,6 @@ $('btn-export').addEventListener('click', async () => {
 
 const kb = (n) => (n > 1e6 ? `${(n / 1e6).toFixed(1)}MB` : `${Math.round(n / 1024)}KB`);
 
-/** 中文量词：说"删了一要点"太生硬 */
 function quantifier(type) {
   if (type === 'section') return '一个';
   if (type === 'entry') return '一段';
@@ -462,13 +514,12 @@ $('btn-save').addEventListener('click', save);
 $('btn-undo').addEventListener('click', undo);
 $('btn-redo').addEventListener('click', redo);
 
-$('btn-page-limit').addEventListener('click', () => {
-  S.pageLimit = !S.pageLimit;
-  S.data.meta.pageLimit = S.pageLimit;
+$('btn-page-limit').addEventListener('click', async () => {
+  pushUndo();
+  S.data.meta.pages = isMultipage() ? 1 : 'auto';
   markDirty();
   refreshPageLimitButton();
-  applyPageLimit();
-  scheduleMeasure();
+  await rerender();
 });
 
 $('btn-add-section').addEventListener('click', async () => {
@@ -495,7 +546,6 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-// 关页面前拦一下未保存的改动
 window.addEventListener('beforeunload', (e) => {
   if (!S.dirty) return;
   e.preventDefault();
@@ -506,7 +556,6 @@ window.addEventListener('beforeunload', (e) => {
 
 const fmtBar = $('fmt-bar');
 
-/** rect 是 iframe 内部坐标，加上 iframe 自己的位置才是屏幕坐标 */
 function placeFmtBar(rect) {
   if (!rect) return (fmtBar.hidden = true);
   const f = frame.getBoundingClientRect();
@@ -517,7 +566,6 @@ function placeFmtBar(rect) {
 }
 
 fmtBar.addEventListener('mousedown', (e) => {
-  // 别让 iframe 里的选中范围因为焦点转移而消失
   e.preventDefault();
   const mark = e.target.closest('button')?.dataset.wrap;
   if (!mark) return;
@@ -525,7 +573,6 @@ fmtBar.addEventListener('mousedown', (e) => {
   const doc = frame.contentDocument;
   const el = doc?.querySelector('.sk-editing');
   if (!el) return;
-  // 复用 iframe 里的按键路径，逻辑只有一份
   el.dispatchEvent(
     new win.KeyboardEvent('keydown', {
       key: mark === '**' ? 'b' : 'e',

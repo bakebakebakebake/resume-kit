@@ -15,14 +15,15 @@
  */
 
 import { zip } from './zip.js';
-import { tokens } from './markup.js';
+import { tokens, isSafeUrl } from './markup.js';
 
 const MM_TO_TWIP = 56.7; // 1mm = 1440/25.4 twip
 const mm = (v) => Math.round(parseFloat(v) * MM_TO_TWIP);
 /** Word 的字号单位是半磅 */
 const halfPt = (v) => Math.round(parseFloat(v) * 2);
 
-const A4 = { w: mm(210), h: mm(297) };
+/** 纸张尺寸兜底：调用方没给（老测试、直接调 toDocx）时按 A4 */
+const A4_MM = { w: 210, h: 297 };
 
 /** 中文字体用系统里一定有的：子集字体嵌不进 docx，写了也白写 */
 const FONT_SERIF = { ascii: 'Georgia', ea: '宋体' };
@@ -37,6 +38,36 @@ const esc = (s) =>
     .replace(/"/g, '&quot;');
 
 const hex = (c, fallback) => String(c ?? fallback).replace(/^#/, '').toUpperCase();
+
+/**
+ * 外部超链接的关系表。
+ *
+ * OOXML 里链接地址不写在段落里，而是放进 word/_rels/document.xml.rels，
+ * 段落只引用一个 rId。所以导出时得边生成段落边攒这张表，
+ * 最后一起写进包 —— rId1/rId2 已经被 styles 和 numbering 占了，从 3 起。
+ */
+function makeRels() {
+  const list = [];
+  return {
+    /** @returns {string|null} rId，地址不安全时 null（调用方退回纯文字） */
+    add(target) {
+      if (!isSafeUrl(target)) return null;
+      const hit = list.find((r) => r.target === target);
+      if (hit) return hit.id;
+      const id = `rId${list.length + 3}`;
+      list.push({ id, target });
+      return id;
+    },
+    xml() {
+      return list
+        .map(
+          (r) =>
+            `<Relationship Id="${r.id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="${esc(r.target)}" TargetMode="External"/>`,
+        )
+        .join('');
+    },
+  };
+}
 
 /**
  * @param {object} data  normalize 后的数据
@@ -60,20 +91,25 @@ export function toDocx(data, defaults = {}) {
   const padX = t['pad-x'] ?? '12mm';
   const padT = t['pad-t'] ?? '11mm';
   const padB = t['pad-b'] ?? '9mm';
+  const sheet = data.meta?.paper ?? A4_MM;
+  const page = { w: mm(sheet.w), h: mm(sheet.h) };
   // 右侧制表位：正文宽度的最右端，时间靠它右对齐
-  const tabRight = A4.w - mm(padX) * 2;
+  const tabRight = page.w - mm(padX) * 2;
 
+  const rels = makeRels();
   const P = [];
-  P.push(...masthead(data.profile, K));
-  for (const s of data.sections) P.push(...section(s, K, tabRight));
+  P.push(...masthead(data.profile, K, rels));
+  for (const s of data.sections) P.push(...section(s, K, tabRight, rels));
 
-  const body = `${P.join('')}<w:sectPr><w:pgSz w:w="${A4.w}" w:h="${A4.h}"/><w:pgMar w:top="${mm(padT)}" w:right="${mm(padX)}" w:bottom="${mm(padB)}" w:left="${mm(padX)}" w:header="0" w:footer="0" w:gutter="0"/></w:sectPr>`;
+  // 横向必须显式写 w:orient：只把宽高对调，Word 打印时仍按纵向送纸
+  const orient = sheet.orientation === 'landscape' ? ' w:orient="landscape"' : '';
+  const body = `${P.join('')}<w:sectPr><w:pgSz w:w="${page.w}" w:h="${page.h}"${orient}/><w:pgMar w:top="${mm(padT)}" w:right="${mm(padX)}" w:bottom="${mm(padB)}" w:left="${mm(padX)}" w:header="0" w:footer="0" w:gutter="0"/></w:sectPr>`;
 
   return zip([
     { name: '[Content_Types].xml', data: CONTENT_TYPES },
     { name: '_rels/.rels', data: ROOT_RELS },
     { name: 'word/document.xml', data: documentXml(body) },
-    { name: 'word/_rels/document.xml.rels', data: DOC_RELS },
+    { name: 'word/_rels/document.xml.rels', data: docRels(rels) },
     { name: 'word/styles.xml', data: stylesXml(K) },
     { name: 'word/numbering.xml', data: NUMBERING },
     { name: 'docProps/core.xml', data: coreXml(data) },
@@ -83,24 +119,55 @@ export function toDocx(data, defaults = {}) {
 
 // ── 段落构造 ──
 
-/** 一段文字 → 一串 run，粗体和代码各自带格式 */
-function runs(text, K, base = {}) {
+/**
+ * 一段文字 → 一串 run，粗体和代码各自带格式，链接包进 w:hyperlink。
+ *
+ * 相邻且地址相同的片段要合进同一个 w:hyperlink：`[**粗** 普通](url)`
+ * 会拆成两个 token，各自包一次的话 Word 里会显示成两个挨着的链接，
+ * 鼠标悬停、右键复制地址都是分开的。
+ */
+function runs(text, K, base = {}, rels = null) {
   const out = [];
-  for (const tk of tokens(text)) {
-    const font = tk.code ? FONT_MONO : (base.font ?? FONT_BODY);
-    const color = tk.code ? K.petrol : (base.color ?? K.ink70);
-    const bold = tk.bold || base.bold;
-    const size = base.size ?? K.fs;
-    out.push(
-      `<w:r><w:rPr>` +
-        `<w:rFonts w:ascii="${font.ascii}" w:hAnsi="${font.ascii}" w:eastAsia="${font.ea}"/>` +
-        (bold ? '<w:b/>' : '') +
-        `<w:color w:val="${bold && !tk.code ? K.ink : color}"/>` +
-        `<w:sz w:val="${halfPt(size)}"/><w:szCs w:val="${halfPt(size)}"/>` +
-        `</w:rPr><w:t xml:space="preserve">${esc(tk.text)}</w:t></w:r>`,
-    );
+  const list = tokens(text);
+
+  for (let i = 0; i < list.length; ) {
+    const href = list[i].href;
+    const rId = href && rels ? rels.add(href) : null;
+
+    if (!rId) {
+      out.push(oneRun(list[i], K, base));
+      i++;
+      continue;
+    }
+
+    let inner = '';
+    while (i < list.length && list[i].href === href) {
+      inner += oneRun(list[i], K, base, true);
+      i++;
+    }
+    out.push(`<w:hyperlink r:id="${rId}">${inner}</w:hyperlink>`);
   }
   return out.join('');
+}
+
+/** 单个片段 → run。link=true 时加下划线并用主题色，让它看得出是链接。 */
+function oneRun(tk, K, base, link = false) {
+  const font = tk.code ? FONT_MONO : (base.font ?? FONT_BODY);
+  const bold = tk.bold || base.bold;
+  const size = base.size ?? K.fs;
+  let color = tk.code ? K.petrol : (base.color ?? K.ink70);
+  if (bold && !tk.code) color = K.ink;
+  if (link) color = K.petrol;
+
+  return (
+    `<w:r><w:rPr>` +
+    `<w:rFonts w:ascii="${font.ascii}" w:hAnsi="${font.ascii}" w:eastAsia="${font.ea}"/>` +
+    (bold ? '<w:b/>' : '') +
+    (link ? '<w:u w:val="single"/>' : '') +
+    `<w:color w:val="${color}"/>` +
+    `<w:sz w:val="${halfPt(size)}"/><w:szCs w:val="${halfPt(size)}"/>` +
+    `</w:rPr><w:t xml:space="preserve">${esc(tk.text)}</w:t></w:r>`
+  );
 }
 
 /** 纯文本 run，不解析标记 */
@@ -111,6 +178,7 @@ function run(text, K, o = {}) {
     `<w:r><w:rPr>` +
     `<w:rFonts w:ascii="${font.ascii}" w:hAnsi="${font.ascii}" w:eastAsia="${font.ea}"/>` +
     (o.bold ? '<w:b/>' : '') +
+    (o.underline ? '<w:u w:val="single"/>' : '') +
     (o.caps ? '<w:spacing w:val="30"/>' : '') +
     `<w:color w:val="${o.color ?? K.ink70}"/>` +
     `<w:sz w:val="${halfPt(size)}"/><w:szCs w:val="${halfPt(size)}"/>` +
@@ -134,7 +202,7 @@ function para(inner, o = {}) {
   return `<w:p>${pr}${inner}</w:p>`;
 }
 
-function masthead(profile, K) {
+function masthead(profile, K, rels) {
   const out = [
     para(run(profile.name, K, { font: FONT_SERIF, size: K.fs * 2.6, bold: true, color: K.ink }), {
       after: 60,
@@ -151,18 +219,22 @@ function masthead(profile, K) {
     );
   }
   if (profile.contact?.length) {
-    const bits = profile.contact.map(
-      (c, i) =>
-        (i ? run('   ·   ', K, { color: K.rule, size: K.fs * 0.9 }) : '') +
-        run(`${c.label} `, K, { color: K.ink45, size: K.fs * 0.9 }) +
-        run(c.value, K, { color: K.ink70, size: K.fs * 0.9 }),
-    );
+    const bits = profile.contact.map((c, i) => {
+      const sep = i ? run('   ·   ', K, { color: K.rule, size: K.fs * 0.9 }) : '';
+      const lbl = run(`${c.label} `, K, { color: K.ink45, size: K.fs * 0.9 });
+      // 有 href 的联系方式做成可点的：招聘方在 Word 里直接点开 GitHub / 邮箱
+      const rId = c.href ? rels.add(c.href) : null;
+      const val = rId
+        ? `<w:hyperlink r:id="${rId}">${run(c.value, K, { color: K.petrol, size: K.fs * 0.9, underline: true })}</w:hyperlink>`
+        : run(c.value, K, { color: K.ink70, size: K.fs * 0.9 });
+      return sep + lbl + val;
+    });
     out.push(para(bits.join(''), { after: 120, border: K.rule, borderSz: 8 }));
   }
   return out;
 }
 
-function section(s, K, tabRight) {
+function section(s, K, tabRight, rels) {
   const out = [
     para(
       run(s.title, K, { font: FONT_SERIF, size: K.fs * 1.15, bold: true, color: K.petrol, caps: true }),
@@ -172,7 +244,9 @@ function section(s, K, tabRight) {
 
   if (s.isList) {
     for (const it of s.items ?? []) {
-      out.push(para(runs(it.text, K), { numId: 1, indent: 300, hanging: 300, lh: K.lh, after: 50 }));
+      out.push(
+        para(runs(it.text, K, {}, rels), { numId: 1, indent: 300, hanging: 300, lh: K.lh, after: 50 }),
+      );
     }
     return out;
   }
@@ -206,18 +280,20 @@ function section(s, K, tabRight) {
       out.push(
         para(
           run(`${e.briefLabel ?? '简介'} `, K, { size: K.fs * 0.85, color: K.ink45 }) +
-            runs(e.brief, K, { size: K.fs * 0.96 }),
+            runs(e.brief, K, { size: K.fs * 0.96 }, rels),
           { after: 60, lh: K.lh },
         ),
       );
     }
 
     for (const p of e.points ?? []) {
-      out.push(para(runs(p.text, K), { numId: 1, indent: 300, hanging: 300, lh: K.lh, after: 50 }));
+      out.push(
+        para(runs(p.text, K, {}, rels), { numId: 1, indent: 300, hanging: 300, lh: K.lh, after: 50 }),
+      );
     }
 
     for (const a of e.awards ?? []) {
-      let line = runs(a.name, K, { size: K.fs * 0.96 });
+      let line = runs(a.name, K, { size: K.fs * 0.96 }, rels);
       if (a.tier) line += run(`  ${a.tier}`, K, { size: K.fs * 0.9, bold: true, color: K.brass });
       if (a.when) {
         line += `<w:r><w:tab/></w:r>` + run(a.when, K, { size: K.fs * 0.88, color: K.ink45 });
@@ -251,14 +327,19 @@ const ROOT_RELS = `${XML}
 <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>
 </Relationships>`;
 
-const DOC_RELS = `${XML}
+const DOC_RELS_HEAD = `${XML}
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
 <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
-<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering" Target="numbering.xml"/>
-</Relationships>`;
+<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering" Target="numbering.xml"/>`;
+
+/** 固定的两项 + 这次导出攒下来的超链接 */
+const docRels = (rels) => `${DOC_RELS_HEAD}${rels.xml()}</Relationships>`;
+
+// w:hyperlink 的 r:id 属性在 r 命名空间里，根元素上不声明 Word 会直接报文件损坏
+const R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
 
 const documentXml = (body) => `${XML}
-<w:document xmlns:w="${W}"><w:body>${body}</w:body></w:document>`;
+<w:document xmlns:w="${W}" xmlns:r="${R}"><w:body>${body}</w:body></w:document>`;
 
 const stylesXml = (K) => `${XML}
 <w:styles xmlns:w="${W}">

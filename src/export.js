@@ -60,7 +60,7 @@ export async function exportAll({ ROOT, outDir, data, formats }) {
 
     if (f === 'png') {
       const p = join(outDir, `${base}.png`);
-      const size = await toPng(stage(), p);
+      const size = await toPng(stage(), p, { paper: data.meta.paper });
       out.push({
         name: `${base}.png`,
         format: 'png',

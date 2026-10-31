@@ -155,16 +155,28 @@ function pngSettled(path, lastSize) {
 /**
  * 整页截图。
  *
- * 窗口尺寸按 A4 的 CSS 像素给（210mm @96dpi = 794px），
- * 清晰度靠 --force-device-scale-factor 放大 —— 直接把窗口开成 3 倍
- * 会让 CSS 里的 mm 单位算出不同的布局，等于换了张纸。
+ * 清晰度靠 --force-device-scale-factor 放大，不靠开大窗口 ——
+ * 窗口变大会让 CSS 里的 mm 算出不同布局，等于换了张纸。
  *
+ * 已知缺陷：窗口宽度正好等于纸宽，会命中皮肤的窄屏断点，
+ * 于是截出来的是手机版式（页边距、字号、行高、页头布局全不一样），
+ * 跟同一份数据导出的 PDF 不是一个东西。PDF 不受影响是因为
+ * @media print 会覆盖回来，PNG 走 @media screen，覆盖不到。
+ *
+ * 光把窗口放宽治不好：桌面规则下 body 有左右内边距，纸会偏在中间，
+ * 两侧带进舞台底色，得把纸那一块裁出来 —— 纯 Node 裁 PNG 要重新编解码。
+ * 迁到 Electron 后 capturePage({rect}) 一行就能裁，连同这个缺陷一起修。
+ *
+ * @param {object} [opts]
+ * @param {{w:number,h:number}} [opts.paper] 纸张毫米尺寸，默认 A4
  * @returns {{w: number, h: number}|null} 实际像素尺寸
  */
-export async function toPng(htmlPath, pngPath, { scale = 3, timeout = 60000 } = {}) {
+export async function toPng(htmlPath, pngPath, { scale = 3, timeout = 60000, paper } = {}) {
   if (existsSync(pngPath)) unlinkSync(pngPath);
-  const W = Math.round((210 * 96) / 25.4);
-  const H = Math.round((297 * 96) / 25.4);
+  const sheet = paper ?? { w: 210, h: 297 };
+  const PX = 96 / 25.4;
+  const W = Math.round(sheet.w * PX);
+  const H = Math.round(sheet.h * PX);
 
   const proc = launch(
     [
@@ -218,14 +230,21 @@ function pngSize(path) {
 /**
  * 量一次排版尺寸。
  *
- * 必须给 --window-size：Chrome 默认视口 800px 会命中皮肤里
- * `max-width:820px` 的窄屏规则，那套规则下 .sheet 是 height:auto，
- * 永远量不出溢出。
+ * 必须给 --window-size，而且要比纸宽：视口落在皮肤的窄屏断点以内时
+ * .sheet 是 height:auto，永远量不出溢出。Chrome 默认视口 800px
+ * 在 A4 下就已经踩中，换更大的纸差得更多。
  *
+ * @param {object} [opts]
+ * @param {{w:number,h:number}} [opts.paper] 纸张毫米尺寸，默认 A4
  * @returns {object|null} fit-probe.js 的测量结果
  */
-export async function probeFit(htmlPath, { timeout = 30000 } = {}) {
-  const proc = launch(['--window-size=1200,1800', '--dump-dom'], htmlPath);
+export async function probeFit(htmlPath, { timeout = 30000, paper } = {}) {
+  const sheet = paper ?? { w: 210, h: 297 };
+  const PX = 96 / 25.4;
+  // 断点是纸宽 + 26，留足余量走桌面规则；高度给两页，够探针量流式内容
+  const winW = Math.round(sheet.w * PX) + 406;
+  const winH = Math.round(sheet.h * PX) * 2;
+  const proc = launch([`--window-size=${winW},${winH}`, '--dump-dom'], htmlPath);
   const t0 = Date.now();
   const NEEDLE = 'data-fit="';
 

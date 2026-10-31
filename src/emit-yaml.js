@@ -14,9 +14,14 @@
 const HEADER = `# ─────────────────────────────────────────────────────────────
 #  简历数据。改这个文件就是改简历，版式不用动。
 #
-#  正文里支持两种行内标记：
-#    **重点**    → 加粗（在要点里是深色强调，在技能里是轻量强调）
-#    \`技术名\`    → 等宽 + 主题色，用来标 Redis / Explain / RocketMQ 这类术语
+#  正文里支持三种行内标记：
+#    **重点**         → 加粗（在要点里是深色强调，在技能里是轻量强调）
+#    \`技术名\`         → 等宽 + 主题色，用来标 Redis / Explain / RocketMQ 这类术语
+#    [文字](地址)     → 链接，PDF / HTML / Word 里都可以点
+#
+#  地址只认 http(s):// 、mailto: 、tel: 开头的，其它写法按普通文字输出。
+#  三种标记可以互相嵌套，如 [**项目主页**](https://example.com)。
+#  要输出字面量的 * \` [ ] 前面加反斜杠。
 #
 #  以 ** 开头的字符串必须加引号，否则 YAML 会把 * 当成锚点引用。
 #
@@ -68,7 +73,16 @@ export function emitYaml(data) {
   L.push('meta:');
   L.push(`  skin: ${scalar(meta.skin ?? 'datasheet')}        # skins/ 下的目录名`);
   L.push(`  output: ${scalar(meta.output ?? 'resume')}     # 导出文件名，不含扩展名`);
-  L.push(`  pages: ${Number(meta.pages ?? 1)}               # 期望页数，导出时对不上会警告`);
+  // auto 是裸标量，不能被 scalar() 加引号 —— "auto" 会被当成期望页数为字符串
+  const pages = meta.pages === 'auto' ? 'auto' : Number(meta.pages ?? 1);
+  L.push(`  pages: ${pages}${pages === 'auto' ? '            ' : '               '}# 期望页数；auto = 不限页数，按内容分页`);
+  // 只在不是默认 A4 纵向时写：默认值写出来是噪音，但漏写就等于
+  // 存一次盘把用户选的纸悄悄换回 A4
+  const paper = meta.paper ?? {};
+  if (paper.spec && paper.spec !== 'A4') {
+    L.push(`  paper: ${scalar(paper.spec)}          # A4 / A3 / A5 / Letter / Legal，或 210x297（毫米）`);
+  }
+  if (paper.orientation === 'landscape') L.push('  orientation: landscape');
   if (meta.lang && meta.lang !== 'zh-CN') L.push(`  lang: ${scalar(meta.lang)}`);
 
   const theme = Object.entries(meta.theme ?? {}).filter(([, v]) => v !== '' && v != null);
