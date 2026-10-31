@@ -11,6 +11,7 @@ import Handlebars from 'handlebars';
 import { inline } from './markup.js';
 import { composeCss } from './page-css.js';
 import { resolvePaper } from './paper.js';
+import { labelsFor } from './i18n.js';
 
 /** 行内标记 helper。返回 SafeString，模板里用 {{md x}} 而不是三花括号。 */
 Handlebars.registerHelper('md', (text) => new Handlebars.SafeString(inline(text)));
@@ -49,6 +50,8 @@ export function render(data, root, opts = {}) {
 
   const html = tpl({
     ...data,
+    // 皮肤里写死的字（如页头的「求职岗位」）从这里取，跟着 meta.lang 换
+    labels: labelsFor(data.meta.lang),
     css: new Handlebars.SafeString(
       composeCss(readFileSync(join(dir, 'style.css'), 'utf8'), paper),
     ),

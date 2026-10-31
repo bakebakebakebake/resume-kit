@@ -15,7 +15,7 @@
   <header class="mast">
     <div>
       <h1 class="name" data-bind="profile.name">{{profile.name}}</h1>
-      {{#if profile.seeking}}<div class="seeking">求职岗位 · <b data-bind="profile.seeking">{{profile.seeking}}</b></div>{{/if}}
+      {{#if profile.seeking}}<div class="seeking">{{labels.seeking}} · <b data-bind="profile.seeking">{{profile.seeking}}</b></div>{{/if}}
     </div>
     {{#if profile.contact}}
     <dl class="chan" data-list="profile.contact">

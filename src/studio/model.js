@@ -91,7 +91,7 @@ export function blank(type) {
         meta: null,
         when: null,
         brief: null,
-        briefLabel: '简介',
+        briefLabel: null, // 服务端 reindex 按 meta.lang 补默认值
         facts: [],
         awards: [],
         points: [{ text: '写点什么', _p: '' }],

@@ -16,6 +16,7 @@
 
 import { zip } from './zip.js';
 import { tokens, isSafeUrl } from './markup.js';
+import { labelsFor } from './i18n.js';
 
 const MM_TO_TWIP = 56.7; // 1mm = 1440/25.4 twip
 const mm = (v) => Math.round(parseFloat(v) * MM_TO_TWIP);
@@ -87,6 +88,8 @@ export function toDocx(data, defaults = {}) {
     // Word 里没有"一页装不下就裁掉"的约束，放大到正常阅读区间。
     fs: Math.max(9.5, parseFloat(t.fs ?? '9') + 1),
     lh: parseFloat(t.lh ?? 1.385),
+    // 页头前缀、默认简介标签这些写死的字，跟着 meta.lang 换
+    labels: labelsFor(data.meta?.lang),
   };
   const padX = t['pad-x'] ?? '12mm';
   const padT = t['pad-t'] ?? '11mm';
@@ -212,7 +215,7 @@ function masthead(profile, K, rels) {
   if (profile.seeking) {
     out.push(
       para(
-        run('求职岗位 · ', K, { size: K.fs * 0.95, color: K.ink45 }) +
+        run(`${K.labels.seeking} · `, K, { size: K.fs * 0.95, color: K.ink45 }) +
           run(profile.seeking, K, { size: K.fs * 0.95, bold: true, color: K.ink70 }),
         { after: 80 },
       ),
@@ -279,7 +282,7 @@ function section(s, K, tabRight, rels) {
     if (e.brief) {
       out.push(
         para(
-          run(`${e.briefLabel ?? '简介'} `, K, { size: K.fs * 0.85, color: K.ink45 }) +
+          run(`${e.briefLabel ?? K.labels.brief} `, K, { size: K.fs * 0.85, color: K.ink45 }) +
             runs(e.brief, K, { size: K.fs * 0.96 }, rels),
           { after: 60, lh: K.lh },
         ),
@@ -365,7 +368,7 @@ const NUMBERING = `${XML}
 
 const coreXml = (data) => `${XML}
 <cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-<dc:title>${esc(data.profile.name)} 简历</dc:title>
+<dc:title>${esc(labelsFor(data.meta.lang).docTitle(data.profile.name))}</dc:title>
 <dc:creator>${esc(data.profile.name)}</dc:creator>
 <cp:lastModifiedBy>resume-kit</cp:lastModifiedBy>
 <dcterms:created xsi:type="dcterms:W3CDTF">${new Date().toISOString()}</dcterms:created>

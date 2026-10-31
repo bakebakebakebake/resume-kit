@@ -11,6 +11,8 @@
  * 少一个引号会让 `**重点**` 被 YAML 当成锚点引用直接报错。
  */
 
+import { labelsFor } from './i18n.js';
+
 const HEADER = `# ─────────────────────────────────────────────────────────────
 #  简历数据。改这个文件就是改简历，版式不用动。
 #
@@ -108,6 +110,8 @@ export function emitYaml(data) {
   }
 
   L.push('');
+  // 跟当前语言的默认标签一样就不写，写出来是噪音；换语言后也能跟着变
+  const defaultBrief = labelsFor(meta.lang).brief;
   L.push('sections:');
   (data.sections ?? []).forEach((s, i) => {
     if (i > 0) L.push('');
@@ -131,7 +135,7 @@ export function emitYaml(data) {
       for (const k of ['badge', 'meta', 'when']) {
         if (e[k]) L.push(`        ${k}: ${scalar(e[k])}`);
       }
-      if (e.briefLabel && e.briefLabel !== '简介') {
+      if (e.briefLabel && e.briefLabel !== defaultBrief) {
         L.push(`        briefLabel: ${scalar(e.briefLabel)}`);
       }
       if (e.facts?.length) {

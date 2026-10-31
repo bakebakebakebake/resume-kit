@@ -14,6 +14,7 @@ meta:
   skin: datasheet
   output: Alex-Chen-Resume
   pages: 1
+  lang: en
 
 profile:
   name: Alex Chen

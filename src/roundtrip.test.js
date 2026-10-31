@@ -179,6 +179,30 @@ export function runTests(dataFile) {
     );
   }
 
+  console.log('\n语言');
+  {
+    // 曾经的 bug：英文简历的页头前缀、默认简介标签、DOCX 标题都写死成中文
+    const f = join(tmp, 'lang.yaml');
+    const src = 'meta:\n  skin: datasheet\n  output: x\n  lang: en\nprofile:\n  name: Alex\n  seeking: Backend\nsections:\n  - title: A\n    entries:\n      - org: O\n        brief: hi\n';
+    writeFileSync(f, src, 'utf8');
+    const d = load(f);
+    const html = render(d, ROOT, {});
+    ok('英文页头前缀', html.includes('Seeking · <b') && !html.includes('求职岗位'));
+    ok('英文默认简介标签', d.sections[0].entries[0].briefLabel === 'Summary');
+    ok('lang 落到 <html>', /<html lang="en"/.test(html));
+    ok('默认标签不写回 YAML', !emitYaml(d).includes('briefLabel'));
+
+    const f2 = join(tmp, 'lang2.yaml');
+    writeFileSync(f2, src.replace('  lang: en\n', ''), 'utf8');
+    const z = load(f2);
+    ok('不写 lang 仍是中文', render(z, ROOT, {}).includes('求职岗位 · <b') && z.sections[0].entries[0].briefLabel === '简介');
+
+    // 工作台新建的条目 briefLabel 是 null，reindex 按语言补
+    d.sections[0].entries.push({ org: 'N', briefLabel: null, facts: [], awards: [], points: [] });
+    reindex(d);
+    ok('reindex 按语言补标签', d.sections[0].entries[1].briefLabel === 'Summary');
+  }
+
   console.log('\n纸张');
   {
     const head = 'meta:\n  skin: datasheet\n  output: x\n';

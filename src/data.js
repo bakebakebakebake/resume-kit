@@ -9,6 +9,7 @@ import { readFileSync } from 'node:fs';
 import { parse } from 'yaml';
 import { lintInline } from './markup.js';
 import { resolvePaper, PAPER_NAMES } from './paper.js';
+import { labelsFor, DEFAULT_LANG } from './i18n.js';
 
 const VARIANTS = new Set(['entry', 'project', 'list']);
 
@@ -63,6 +64,8 @@ function normalize(doc) {
   const meta = doc.meta ?? {};
   const profile = doc.profile ?? {};
   const pages = parsePages(meta.pages);
+  const lang = meta.lang ?? DEFAULT_LANG;
+  const L = labelsFor(lang);
 
   return {
     meta: {
@@ -74,7 +77,7 @@ function normalize(doc) {
       multipage: pages === 'auto' || (Number.isFinite(pages) && pages > 1),
       // 纸张几何：渲染、探针、DOCX、工作台视口都从这一份读
       paper: resolvePaper(meta.paper, meta.orientation),
-      lang: meta.lang ?? 'zh-CN',
+      lang,
       // 版式旋钮：只存跟皮肤默认值不同的那几个，空对象就是纯用皮肤的
       theme: { ...(meta.theme ?? {}) },
     },
@@ -88,15 +91,15 @@ function normalize(doc) {
         _p: `profile.contact.${i}`,
       })),
     },
-    sections: (doc.sections ?? []).map(normalizeSection),
+    sections: (doc.sections ?? []).map((s, i) => normalizeSection(s, i, L)),
   };
 }
 
-function normalizeSection(s, i) {
+function normalizeSection(s, i, L) {
   const variant = s.variant ?? 'entry';
   const at = `sections.${i}`;
   return {
-    title: s.title ?? `未命名章节 ${i + 1}`,
+    title: s.title ?? `${L.untitled} ${i + 1}`,
     variant,
     // Handlebars 的 #if 只看真假，比较字符串要额外 helper，
     // 所以标志位在这里就摊平。
@@ -115,7 +118,7 @@ function normalizeSection(s, i) {
         meta: e.meta ?? null,
         when: e.when ?? null,
         brief: e.brief ?? null,
-        briefLabel: e.briefLabel ?? '简介',
+        briefLabel: e.briefLabel ?? L.brief,
         _p: eat,
         facts: (e.facts ?? []).map((f, k) => ({
           k: f.k ?? '',
@@ -153,6 +156,7 @@ export function reindex(data) {
     // 已经是解析过的对象则原样放行（resolvePaper 自己认得）
     data.meta.paper = resolvePaper(data.meta.paper, data.meta.paper?.orientation);
   }
+  const L = labelsFor(data.meta?.lang);
   data.sections.forEach((s, i) => {
     const at = `sections.${i}`;
     s._p = at;
@@ -162,6 +166,8 @@ export function reindex(data) {
     s.entries?.forEach((e, j) => {
       const eat = `${at}.entries.${j}`;
       e._p = eat;
+      // 工作台新建的条目不带标签，语言只有服务端知道
+      e.briefLabel ??= L.brief;
       e.facts?.forEach((f, k) => (f._p = `${eat}.facts.${k}`));
       e.awards?.forEach((a, k) => (a._p = `${eat}.awards.${k}`));
       e.points?.forEach((t, k) => (t._p = `${eat}.points.${k}`));

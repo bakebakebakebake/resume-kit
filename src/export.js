@@ -13,6 +13,7 @@ import { render } from './render.js';
 import { toPdf, toPng } from './pdf.js';
 import { toDocx } from './docx.js';
 import { rootVars } from './skin-vars.js';
+import { labelsFor } from './i18n.js';
 
 const KNOWN = ['pdf', 'png', 'docx', 'html'];
 
@@ -70,11 +71,11 @@ export async function exportAll({ ROOT, outDir, data, formats }) {
     }
 
     if (f === 'html') {
-      const p = join(outDir, `${base}-单文件.html`);
+      const p = join(outDir, `${base}-${labelsFor(data.meta.lang).standalone}.html`);
       const html = renderInlined(data, ROOT);
       writeFileSync(p, html, 'utf8');
       out.push({
-        name: `${base}-单文件.html`,
+        name: `${base}-${labelsFor(data.meta.lang).standalone}.html`,
         format: 'html',
         bytes: statSync(p).size,
         note: '字体已内联，可单独发送',
