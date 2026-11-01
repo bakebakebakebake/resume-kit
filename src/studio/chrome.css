@@ -24,6 +24,7 @@
   --ui:-apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue",sans-serif;
   --mono:"SF Mono",ui-monospace,Menlo,monospace;
   --bar-h:48px;
+  --side-w:268px;
 }
 
 body{
@@ -75,14 +76,40 @@ body{
   border:1px solid var(--line);
   background:var(--bg-3);color:var(--fg);
   cursor:pointer;white-space:nowrap;
+  display:inline-flex;align-items:center;gap:6px;
   transition:background .12s,border-color .12s,opacity .12s;
 }
+.btn svg,.seg svg{
+  width:14px;height:14px;flex:none;
+  fill:none;stroke:currentColor;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round;
+}
+.btn.icon{padding:6px 7px;color:var(--fg-2)}
+.btn.icon:hover:not(:disabled){color:var(--fg)}
+.btn.ghost{border-color:transparent}
+.btn.ghost:hover:not(:disabled){border-color:transparent}
+.btn.icon.on{color:var(--accent)}
+
+/* 缩放：− 100% +，中间那格点一下回到“适应宽度” */
+.seg{
+  display:inline-flex;align-items:center;
+  border-radius:6px;background:var(--bg-3);
+  border:1px solid var(--line);overflow:hidden;
+}
+.seg button{
+  font:inherit;font-size:11.5px;height:26px;min-width:26px;padding:0 6px;
+  border:0;background:none;color:var(--fg-2);cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;
+}
+.seg button:hover{background:#2E333A;color:var(--fg)}
+.seg .val{min-width:48px;font-family:var(--mono);font-size:11px}
+.seg .val.fit{color:var(--accent)}
 .btn:hover:not(:disabled){background:#2E333A;border-color:#3D444C}
 .btn:active:not(:disabled){transform:translateY(1px)}
 .btn:disabled{opacity:.38;cursor:default}
 .btn.primary{background:var(--accent-dim);border-color:#38867F;color:#F2FBFA}
 .btn.primary:hover:not(:disabled){background:#35837C}
 .btn.ghost{background:transparent}
+.btn.ghost:hover:not(:disabled){background:var(--bg-3)}
 .btn.wide{width:100%;justify-content:center;margin-top:10px}
 .btn.dirty{background:var(--accent);border-color:var(--accent);color:#0C2725;font-weight:600}
 
@@ -90,15 +117,29 @@ body{
 .wrap{
   height:calc(100vh - var(--bar-h));
   display:grid;
-  grid-template-columns:1fr 268px;
+  grid-template-columns:minmax(0,1fr) var(--side-w);
+  transition:grid-template-columns .18s ease;
 }
+/* 收起右侧面板：纸能占满整个宽度 */
+.wrap.side-off{grid-template-columns:minmax(0,1fr) 0}
+.wrap.side-off .side{border-left-color:transparent}
 .stage{
   overflow:auto;
   padding:26px 26px 0;
-  display:flex;flex-direction:column;align-items:center;
+  /* 不用 align-items:center：纸放大后比舞台宽时左边会被裁掉、滚不到。
+     用 margin:auto 居中，放不下时自然从左边开始 */
+  display:flex;flex-direction:column;align-items:flex-start;
   background:
     radial-gradient(ellipse at 50% 0%,#1E2226 0%,var(--bg) 62%);
 }
+/* 缩放用 transform，iframe 里的排版、量尺寸、点击坐标都不受影响；
+   外面这层按缩放后的尺寸占位，滚动条才对 */
+.paper-zoom{
+  flex:none;margin:0 auto;
+  width:calc(var(--paper-w,794px) * var(--zoom,1));
+  height:calc(var(--hold-h,var(--paper-h,1123px)) * var(--zoom,1));
+}
+.paper-zoom .paper-hold{transform:scale(var(--zoom,1));transform-origin:0 0}
 .paper-hold{
   /* 只露出纸那一块。尺寸由 editor.js 按当前纸张写进这两个变量
      （--paper-w/h），换纸时跟着变；这里的值只是首屏 A4 的兜底。 */
@@ -125,7 +166,7 @@ body{
   height:var(--paper-h,1123px);
   border:0;display:block;
 }
-.stage-foot{padding:16px 0 26px}
+.stage-foot{padding:16px 0 26px;margin:0 auto}
 
 /* ── 右侧面板 ── */
 .side{
@@ -133,8 +174,10 @@ body{
   border-left:1px solid var(--line);
   overflow:hidden;
   display:flex;
+  min-width:0;
 }
-.side-scroll{overflow-y:auto;padding:4px 0 30px;width:100%}
+/* 宽度定死，收起动画时里面的字不跟着挤 */
+.side-scroll{overflow-y:auto;padding:4px 0 30px;width:var(--side-w);flex:none}
 .grp{padding:14px 14px 16px;border-bottom:1px solid var(--line)}
 .grp:last-child{border-bottom:0}
 .grp h3{
@@ -190,15 +233,22 @@ body{
 }
 .sec-list .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}
 .sec-list .nm:hover{color:var(--accent)}
+.sec-list li{transition:background .12s}
+.sec-list li:hover{background:#2A2F35}
 .sec-list .vr{
-  font-size:9.5px;color:var(--fg-3);font-family:var(--mono);
-  padding:1px 4px;border:1px solid var(--line);border-radius:3px;
+  font-size:10.5px;color:var(--fg-3);
+  padding:1px 6px;border:1px solid var(--line);border-radius:10px;
+  cursor:pointer;transition:color .12s,border-color .12s;
 }
+.sec-list .vr:hover{color:var(--accent);border-color:var(--accent-dim)}
 .sec-list button{
   background:none;border:0;color:var(--fg-3);cursor:pointer;
   font-size:13px;line-height:1;padding:2px 3px;border-radius:3px;
+  opacity:0;transition:opacity .12s;
 }
-.sec-list button:hover{color:var(--bad);background:#2E2224}
+.sec-list li:hover button{opacity:1}
+.sec-list button:hover{color:var(--fg);background:#383E46}
+.sec-list button[data-act="del"]:hover{color:var(--bad);background:#2E2224}
 
 /* 导出格式 */
 .fmts{display:flex;flex-direction:column;gap:2px}
@@ -222,6 +272,12 @@ body{
 .results a em{color:var(--fg-3);font-style:normal;font-size:10.5px;white-space:nowrap}
 .results .err{font-size:11.5px;color:var(--bad);line-height:1.5;padding:5px 7px}
 
+/* 用法说明默认收着，要看再点开 */
+.help summary{list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between}
+.help summary::-webkit-details-marker{display:none}
+.help summary::after{content:"";width:6px;height:6px;margin:0 3px 10px 0;border:solid var(--fg-3);border-width:0 1.4px 1.4px 0;transform:rotate(45deg);transition:transform .15s}
+.help[open] summary::after{transform:rotate(-135deg);margin-bottom:6px}
+.help summary:hover h3{color:var(--fg-2)}
 .tips{list-style:none;font-size:11.5px;color:var(--fg-3);line-height:1.65}
 .tips li{margin-bottom:5px;padding-left:11px;position:relative}
 .tips li::before{content:"·";position:absolute;left:2px;color:var(--fg-3)}
@@ -259,6 +315,6 @@ body{
 .toast[data-kind="ok"]{border-color:var(--accent-dim);color:var(--fg)}
 
 @media (max-width:1180px){
-  .wrap{grid-template-columns:1fr 236px}
+  :root{--side-w:236px}
   .stage{padding:16px 16px 0}
 }

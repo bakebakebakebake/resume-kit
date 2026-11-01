@@ -50,7 +50,65 @@ function applyPaperSize() {
   st.setProperty('--paper-w', `${w}px`);
   st.setProperty('--paper-h', `${h}px`);
   st.setProperty('--frame-w', `${w + 106}px`);
+  applyZoom();
 }
+
+// ── 缩放 ──
+// 默认“适应宽度”：纸比舞台宽就缩小，最大不超过 100%。手动调过就按手动的来，
+// 点中间的百分比回到适应宽度。只是看的大小，不进数据也不影响导出。
+
+const ZOOM_STEPS = [0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5];
+const view = { zoom: null, applied: 1 }; // zoom === null 表示适应宽度
+
+function fitZoom() {
+  const stage = $('stage');
+  const w = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--paper-w')) || 794;
+  const pad = parseFloat(getComputedStyle(stage).paddingLeft) * 2;
+  const room = stage.clientWidth - pad;
+  return room > 0 ? Math.min(1, room / w) : 1;
+}
+
+function applyZoom() {
+  const z = view.zoom ?? fitZoom();
+  view.applied = z;
+  document.documentElement.style.setProperty('--zoom', z.toFixed(4));
+  const val = $('zoom-val');
+  val.textContent = `${Math.round(z * 100)}%`;
+  val.classList.toggle('fit', view.zoom == null);
+  val.title = view.zoom == null ? '适应宽度（点 − / + 手动调）' : '点一下回到适应宽度';
+}
+
+function stepZoom(dir) {
+  const cur = view.applied;
+  const next = dir > 0 ? ZOOM_STEPS.find((z) => z > cur + 0.001) : [...ZOOM_STEPS].reverse().find((z) => z < cur - 0.001);
+  if (next == null) return;
+  view.zoom = next;
+  applyZoom();
+}
+
+$('zoom-in').addEventListener('click', () => stepZoom(1));
+$('zoom-out').addEventListener('click', () => stepZoom(-1));
+$('zoom-val').addEventListener('click', () => {
+  view.zoom = null;
+  applyZoom();
+});
+new ResizeObserver(() => view.zoom == null && applyZoom()).observe($('stage'));
+
+// ── 右侧面板收起 / 展开，记在本地 ──
+
+function setSide(open) {
+  $('wrap').classList.toggle('side-off', !open);
+  const b = $('btn-side');
+  b.title = open ? '收起右侧面板' : '展开右侧面板';
+  b.classList.toggle('on', !open);
+  try {
+    localStorage.setItem('studio.side', open ? '1' : '0');
+  } catch {}
+}
+setSide(localStorage.getItem('studio.side') !== '0');
+$('btn-side').addEventListener('click', () => setSide($('wrap').classList.contains('side-off')));
+// 面板宽度有过渡，过渡完再按新宽度适应一次
+$('wrap').addEventListener('transitionend', () => view.zoom == null && applyZoom());
 
 const isMultipage = () => {
   const p = S.data?.meta?.pages;
@@ -214,8 +272,9 @@ function alignPaper() {
   frame.style.height = `${Math.ceil(top + h) + 40}px`;
   frame.style.left = `${-Math.round(r.left)}px`;
   frame.style.top = `${-Math.round(top)}px`;
-  // 多页模式下纸会长高，外框跟着长，第二页往后才看得见
+  // 多页模式下纸会长高，外框跟着长，第二页往后才看得见；缩放占位跟着这个高度算
   frame.parentElement.style.height = `${h}px`;
+  document.documentElement.style.setProperty('--hold-h', `${h}px`);
 }
 
 async function measure() {
@@ -461,11 +520,12 @@ function applyPageLimit() {
 
 function refreshPageLimitButton() {
   const btn = $('btn-page-limit');
+  const text = btn.querySelector('span');
   if (!isMultipage()) {
-    btn.textContent = '📄 限制一页';
+    text.textContent = '限制一页';
     btn.title = '当前：超出会被裁掉。点击切换到多页模式（meta.pages: auto）';
   } else {
-    btn.textContent = '📄 不限页数';
+    text.textContent = '不限页数';
     btn.title = '当前：内容可以超过一页，按内容分页。点击切换回单页限制';
   }
 }
@@ -634,11 +694,13 @@ const fmtBar = $('fmt-bar');
 
 function placeFmtBar(rect) {
   if (!rect) return (fmtBar.hidden = true);
+  // rect 是 iframe 里的坐标，纸缩放过，要乘回去
   const f = frame.getBoundingClientRect();
+  const z = view.applied;
   fmtBar.hidden = false;
   const w = fmtBar.offsetWidth || 64;
-  fmtBar.style.left = `${Math.max(6, f.left + rect.left + rect.width / 2 - w / 2)}px`;
-  fmtBar.style.top = `${f.top + rect.top - fmtBar.offsetHeight - 6}px`;
+  fmtBar.style.left = `${Math.max(6, f.left + (rect.left + rect.width / 2) * z - w / 2)}px`;
+  fmtBar.style.top = `${f.top + rect.top * z - fmtBar.offsetHeight - 6}px`;
 }
 
 fmtBar.addEventListener('mousedown', (e) => {
