@@ -97,6 +97,8 @@ function hex(c) {
     : s.toLowerCase();
 }
 
+const VARIANT_NAME = { entry: '经历', project: '项目', list: '清单', text: '段落' };
+
 /** 章节列表：改标题、切形态、删、排序 */
 export function buildSectionList(ul, data, { onJump, onVariant, onDelete, onMove }) {
   ul.innerHTML = '';
@@ -104,7 +106,7 @@ export function buildSectionList(ul, data, { onJump, onVariant, onDelete, onMove
     const li = document.createElement('li');
     li.innerHTML =
       `<span class="nm" title="点一下跳到这个章节">${escape(s.title)}</span>` +
-      `<span class="vr" title="章节形态">${s.variant}</span>` +
+      `<span class="vr" title="章节形态，点一下切换：经历 → 项目 → 清单 → 段落">${VARIANT_NAME[s.variant] ?? s.variant}</span>` +
       `<button data-act="up" title="上移">↑</button>` +
       `<button data-act="down" title="下移">↓</button>` +
       `<button data-act="del" title="删掉整个章节">×</button>`;

@@ -327,6 +327,15 @@ ul.skills li::before{
 /* 技能里的加粗是轻量强调，不跟要点里的同重量 */
 ul.skills .lead{font-weight:500;color:var(--ink)}
 
+/* ── 段落（variant: text，自我评价 / Summary）──
+   字体、字号、行高、颜色跟条目要点一致，看起来是同一套正文 */
+.sec-text{
+  font-family:var(--body);
+  font-size:var(--fs);
+  line-height:var(--lh);
+  color:var(--ink);
+}
+
 /* ── 溢出提示：只在屏幕上出现，打印时不带 ─── */
 @media screen{
   html.is-overflowing .sheet::after{

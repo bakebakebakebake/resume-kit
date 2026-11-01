@@ -3,9 +3,10 @@
   "configurations": [
     {
       "name": "studio",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "studio"],
-      "port": 5173
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["src/cli.js", "studio", "--no-open", "--port=5188"],
+      "port": 5188,
+      "autoPort": false
     }
   ]
 }

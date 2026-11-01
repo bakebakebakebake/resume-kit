@@ -151,6 +151,65 @@ function emit(text, ctx, out, bin) {
 }
 
 /**
+ * tokens() 的逆运算：一串带格式的片段 → 标记文本。
+ *
+ * 工作台所见即所得编辑时，用户改的是渲染后的 DOM，提交时把 DOM 读成片段，
+ * 再经这里写回数据。约束只有一条：inline(fromTokens(runs)) 渲染出的
+ * 文字和格式要和 runs 一致。
+ *
+ * 嵌套顺序固定为 链接 ⊃ 粗体 ⊃ 代码，和 inline() 的处理顺序对得上：
+ * 粗体在链接里面先被替换成 <span>，不含方括号，链接正则照样能匹配；
+ * 代码在最里层，它的反引号不会被前两步碰到。
+ *
+ * @param {Array<{text: string, bold?: boolean, code?: boolean, href?: string|null}>} runs
+ * @returns {string}
+ */
+export function fromTokens(runs) {
+  const rs = (runs ?? []).filter((r) => r && r.text);
+  let out = '';
+  for (const g of groupBy(rs, (r) => (r.href && isSafeUrl(r.href) ? r.href.trim() : null))) {
+    const body = groupBy(g.items, (r) => !!r.bold)
+      .map((b) => {
+        const inner = groupBy(b.items, (r) => !!r.code)
+          .map((c) => {
+            const text = c.items.map((r) => r.text).join('');
+            return c.key ? `\`${escapeText(text)}\`` : escapeText(text);
+          })
+          .join('');
+        return b.key ? `**${inner}**` : inner;
+      })
+      .join('');
+    out += g.key ? `[${body}](${encodeHref(g.key)})` : body;
+  }
+  return out;
+}
+
+/** 相邻且 key 相同的归成一组 */
+function groupBy(items, keyOf) {
+  const groups = [];
+  for (const it of items) {
+    const key = keyOf(it);
+    const last = groups[groups.length - 1];
+    if (last && last.key === key) last.items.push(it);
+    else groups.push({ key, items: [it] });
+  }
+  return groups;
+}
+
+/**
+ * 字面量转义。星号、反引号、方括号一律转义；反斜杠只在会被误读时转义
+ * （后面跟着能转义的字符，或者在末尾挨着下一段的标记），
+ * 免得 `C:\Users` 这种路径每次编辑都被改写一遍。
+ */
+function escapeText(s) {
+  return s.replace(/\\(?=[*`[\]\\]|$)|[*`[\]]/g, (c) => `\\${c}`);
+}
+
+/** 链接地址里不许有空白和右括号（见 LINK_RE），用百分号编码绕开 */
+const encodeHref = (u) =>
+  u.replace(/[\s()]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`);
+
+/**
  * 找出没闭合的标记。写数据时漏一个星号很常见，
  * 渲染出来只是少了加粗，肉眼不容易发现，所以显式报出来。
  *

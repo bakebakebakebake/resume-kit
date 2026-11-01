@@ -33,6 +33,7 @@ const HEADER = `# ────────────────────�
 const VARIANT_NOTE = {
   project: 'variant: project → 标题用项目样式，条目之间加细分割线',
   list: 'variant: list → 只有条目，没有标题行',
+  text: 'variant: text → 一段自由文字（自我评价 / Summary），写在 body 里',
 };
 
 /** YAML 里会被误读的裸标量：留给库判断太啰嗦，直接列出来 */
@@ -121,6 +122,12 @@ export function emitYaml(data) {
 
     L.push(`  - title: ${scalar(s.title ?? '')}`);
     if (s.variant && s.variant !== 'entry') L.push(`    variant: ${scalar(s.variant)}`);
+
+    // text 只有一段 body，entries / items 都不写，免得存盘后冒出空键
+    if (s.variant === 'text') {
+      L.push(`    body: ${scalar(s.body ?? '')}`);
+      return;
+    }
 
     if (s.variant === 'list') {
       L.push('    items:');

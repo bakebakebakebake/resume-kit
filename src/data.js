@@ -11,7 +11,7 @@ import { lintInline } from './markup.js';
 import { resolvePaper, PAPER_NAMES } from './paper.js';
 import { labelsFor, DEFAULT_LANG } from './i18n.js';
 
-const VARIANTS = new Set(['entry', 'project', 'list']);
+const VARIANTS = new Set(['entry', 'project', 'list', 'text']);
 
 /** 读并解析 YAML，出错时带上文件名和行号 */
 export function load(file) {
@@ -105,7 +105,10 @@ function normalizeSection(s, i, L) {
     // 所以标志位在这里就摊平。
     isProject: variant === 'project',
     isList: variant === 'list',
+    isText: variant === 'text',
     _p: at,
+    // text 章节只有一段正文（自我评价 / Summary），带 data-bind="<_p>.body"
+    body: s.body ?? '',
     items: (s.items ?? []).map((t, k) => ({
       text: typeof t === 'string' ? t : (t?.text ?? ''),
       _p: `${at}.items.${k}`,
@@ -162,6 +165,8 @@ export function reindex(data) {
     s._p = at;
     s.isProject = s.variant === 'project';
     s.isList = s.variant === 'list';
+    s.isText = s.variant === 'text';
+    s.body ??= '';
     s.items?.forEach((t, k) => (t._p = `${at}.items.${k}`));
     s.entries?.forEach((e, j) => {
       const eat = `${at}.entries.${j}`;
@@ -201,7 +206,11 @@ export function lint(data) {
     if (!VARIANTS.has(s.variant)) {
       errors.push(`${at}.variant = "${s.variant}" 不认识，可选：${[...VARIANTS].join(' / ')}`);
     }
-    if (s.isList) {
+    if (s.isText) {
+      if (!String(s.body).trim()) warnings.push(`${at} 是 text 但 body 为空`);
+      if (s.entries?.length) warnings.push(`${at} 是 text，entries 会被忽略`);
+      if (s.items?.length) warnings.push(`${at} 是 text，items 会被忽略`);
+    } else if (s.isList) {
       if (!s.items.length) warnings.push(`${at} 是 list 但 items 为空`);
       if (s.entries.length) warnings.push(`${at} 是 list，entries 会被忽略`);
     } else {
@@ -209,6 +218,7 @@ export function lint(data) {
       if (s.items.length) warnings.push(`${at} 不是 list，items 会被忽略`);
     }
 
+    pushInline(warnings, `${at}.body`, s.body);
     s.items.forEach((t, i) => pushInline(warnings, `${at}.items[${i}]`, t.text));
     s.entries.forEach((e, ei) => {
       const eat = `${at}.entries[${ei}] (${e.org || '无标题'})`;

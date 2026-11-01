@@ -245,6 +245,12 @@ function section(s, K, tabRight, rels) {
     ),
   ];
 
+  // 自我评价这类整段文字：一个普通段落，行内标记跟要点一样落成 run
+  if (s.isText) {
+    if (s.body) out.push(para(runs(s.body, K, {}, rels), { lh: K.lh, after: 50 }));
+    return out;
+  }
+
   if (s.isList) {
     for (const it of s.items ?? []) {
       out.push(

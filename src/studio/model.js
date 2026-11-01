@@ -45,6 +45,7 @@ export function locate(root, rowPath) {
  * 倒数第二段就是容器名，唯一的例外是 sections 本身（只有两段）。
  */
 export function rowType(path) {
+  if (path === 'profile') return 'profile';
   const segs = path.split('.');
   const container = segs[segs.length - 2];
   return (
@@ -68,6 +69,7 @@ const LABEL = {
   award: '奖项',
   fact: '数据',
   contact: '联系方式',
+  profile: '页头',
 };
 export const label = (t) => LABEL[t] ?? '这行';
 
@@ -112,14 +114,11 @@ export function blank(type) {
 }
 
 /**
- * 哪些字段吃行内标记。
- *
- * 这些字段编辑时显示原始标记（`**重点**` 而不是加粗后的样子）:
- * 所见即所得在有标记的地方会打架 —— contenteditable 里改加粗后的 span,
- * 浏览器会塞进各种自己的标签,再反推回标记就没准了。
- * 显示源码反而更好预测,跟 Obsidian 的源码模式一个道理。
+ * 哪些字段吃行内标记（加粗 / 技术名 / 链接）。
+ * 编辑时照样显示渲染后的样子，提交时从 DOM 读出格式再写回标记，
+ * 见 paper.js 的 readRuns + markup.js 的 fromTokens。
  */
-const MARKUP_FIELDS = /(\.points\.\d+\.text|\.items\.\d+\.text|\.brief|\.awards\.\d+\.name)$/;
+const MARKUP_FIELDS = /(\.points\.\d+\.text|\.items\.\d+\.text|\.brief|\.body|\.awards\.\d+\.name)$/;
 export const isMarkupField = (path) => MARKUP_FIELDS.test(path);
 
 /** 空了就该消失的字段。必填的留着空字符串，让校验去报。 */
@@ -168,6 +167,60 @@ export function rowPathOfField(fieldPath) {
   }
   // 其它字段：去掉最后的 .fieldName
   return fieldPath.slice(0, fieldPath.lastIndexOf('.'));
+}
+
+/**
+ * 一行里可以补回来的字段。
+ *
+ * 可选字段空了模板就不渲染，纸上没地方点，也就加不回来。
+ * 工具条上的「+ 字段」列出当前缺的这些，点一下填个占位进去，
+ * 重渲染后焦点落在占位上、整段选中，直接打字就替换掉。
+ * kind=list 的是子列表：补的是一整行，焦点落在新行的第一格。
+ */
+const EXTRA = {
+  entry: [
+    { key: 'meta', name: '职位 / 副标题', ph: ['职位', 'Role'] },
+    { key: 'when', name: '时间', ph: ['2024.01 — 至今', 'Jan 2024 — Present'] },
+    { key: 'badge', name: '标签', ph: ['标签', 'Tag'] },
+    { key: 'brief', name: '简介', ph: ['一句话说清楚做了什么', 'One line on what this was'] },
+    { key: 'facts', name: '数据', kind: 'list', row: 'fact', focus: '.k' },
+    { key: 'points', name: '要点', kind: 'list', row: 'point', focus: '.text' },
+    { key: 'awards', name: '奖项', kind: 'list', row: 'award', focus: '.name' },
+  ],
+  award: [
+    { key: 'tier', name: '等级', ph: ['一等奖', 'First Prize'] },
+    { key: 'when', name: '时间', ph: ['2024.01', 'Jan 2024'] },
+  ],
+  profile: [
+    { key: 'seeking', name: '求职意向', ph: ['目标岗位', 'Target role'] },
+    { key: 'contact', name: '联系方式', kind: 'list', row: 'contact', focus: '.label' },
+  ],
+};
+
+/** 这一行现在缺哪些字段 */
+export function missingFields(data, rowPath) {
+  const row = getAt(data, rowPath);
+  if (!row) return [];
+  return (EXTRA[rowType(rowPath)] ?? []).filter((f) =>
+    f.kind === 'list' ? !row[f.key]?.length : row[f.key] == null || row[f.key] === '',
+  );
+}
+
+/**
+ * 补上一个字段，返回重渲染后该聚焦的 data-bind 路径。
+ * 占位文字按简历语言挑，免得英文简历里冒出中文。
+ */
+export function fillField(data, rowPath, key) {
+  const f = (EXTRA[rowType(rowPath)] ?? []).find((x) => x.key === key);
+  const row = getAt(data, rowPath);
+  if (!f || !row) return null;
+  if (f.kind === 'list') {
+    row[key] = [blank(f.row)];
+    return `${rowPath}.${key}.0${f.focus}`;
+  }
+  const zh = String(data.meta?.lang ?? 'zh').toLowerCase().startsWith('zh');
+  row[key] = f.ph[zh ? 0 : 1];
+  return `${rowPath}.${key}`;
 }
 
 /** 深拷贝一份快照，撤销栈用 */

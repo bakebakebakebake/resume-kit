@@ -12,7 +12,7 @@
 <body>
 <div class="sheet">
 
-  <header class="mast">
+  <header class="mast" data-row="profile">
     <div>
       <h1 class="name" data-bind="profile.name">{{profile.name}}</h1>
       {{#if profile.seeking}}<div class="seeking">{{labels.seeking}} · <b data-bind="profile.seeking">{{profile.seeking}}</b></div>{{/if}}
@@ -30,7 +30,9 @@
   <section class="sec" data-row="{{_p}}" data-variant="{{variant}}">
     <h2 class="sec-title" data-bind="{{_p}}.title">{{title}}</h2>
 
-    {{#if isList}}
+    {{#if isText}}
+    <p class="sec-text" data-bind="{{_p}}.body">{{md body}}</p>
+    {{else if isList}}
     <ul class="skills" data-list="{{_p}}.items">
       {{#each items}}<li data-row="{{_p}}" data-bind="{{_p}}.text">{{md text}}</li>
       {{/each}}

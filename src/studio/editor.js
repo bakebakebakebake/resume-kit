@@ -8,7 +8,7 @@
  */
 
 import { inline } from '/src/markup.js';
-import { getAt, setAt, locate, blank, snap, isOptional, label } from './model.js';
+import { getAt, setAt, locate, blank, snap, isOptional, label, fillField } from './model.js';
 import { mount } from './paper.js';
 import { buildKnobs, buildSectionList } from './knobs.js';
 
@@ -24,7 +24,7 @@ const frame = $('paper');
  */
 const FOCUS_SUFFIX = {
   point: '.text', item: '.text', entry: '.org',
-  award: '.name', fact: '.k', contact: '.label',
+  award: '.name', fact: '.k', contact: '.label', section: '.title',
 };
 
 const S = {
@@ -106,25 +106,28 @@ async function rerender() {
   const html = await r.text();
   if (seq !== renderSeq) return;
 
-  await new Promise((ok) => {
-    frame.addEventListener('load', ok, { once: true });
-    frame.srcdoc = html;
-  });
-  if (seq !== renderSeq) return;
+  // 能原地换就原地换：iframe 不重载，没有白屏、滚动位置不丢、字体不用重新等
+  if (!swapSheet(html)) {
+    await new Promise((ok) => {
+      frame.addEventListener('load', ok, { once: true });
+      frame.srcdoc = html;
+    });
+    if (seq !== renderSeq) return;
 
-  alignPaper();
-
-  S.paper = mount(frame, {
-    data: () => S.data,
-    renderInline: inline,
-    onEdit: applyEdit,
-    onStructure: applyStructure,
-    onSelect: placeFmtBar,
-    onSave: save,
-  });
+    S.paper = mount(frame, {
+      data: () => S.data,
+      renderInline: inline,
+      onEdit: applyEdit,
+      onStructure: applyStructure,
+      onSelect: placeFmtBar,
+      onSave: save,
+      onInput: () => scheduleMeasure(true),
+    });
+  }
 
   applyTheme();
   applyPageLimit();
+  alignPaper();
 
   // ── 跨重渲染焦点恢复 ──
   if (S.pendingFocus) {
@@ -155,15 +158,64 @@ async function rerender() {
   await measure();
 }
 
+/**
+ * 只把 .sheet 换成新渲染的，iframe 里的其余东西（样式、探针脚本、
+ * paper.js 挂的监听器和浮层）原样留着。
+ *
+ * 皮肤 CSS 或纸张变了就不行 —— 那些在 <head> 里，换了要整页重载，
+ * 返回 false 让调用方走 srcdoc。
+ */
+function swapSheet(html) {
+  const doc = frame.contentDocument;
+  const cur = doc?.querySelector('.sheet');
+  if (!S.paper || !cur) return false;
+
+  const next = new DOMParser().parseFromString(html, 'text/html');
+  const sheet = next.querySelector('.sheet');
+  if (!sheet || headKey(next) !== headKey(doc)) return false;
+
+  // 主题覆盖跟着数据走：knob 清空时 applyTheme 只删内联变量，这里的旧值不同步就会漏出来
+  const theme = doc.getElementById('theme-overrides');
+  const nextTheme = next.getElementById('theme-overrides');
+  if (theme && nextTheme) theme.textContent = nextTheme.textContent;
+  else if (theme) theme.remove();
+  else if (nextTheme) doc.head.appendChild(doc.importNode(nextTheme, true));
+  doc.title = next.title;
+
+  // <html> 上的 lang / data-pages / data-page-mm；style（主题变量）和 class（探针的标记）是运行时的，不动
+  const root = doc.documentElement;
+  for (const { name } of [...root.attributes]) {
+    if (name !== 'style' && name !== 'class' && !next.documentElement.hasAttribute(name)) root.removeAttribute(name);
+  }
+  for (const { name, value } of next.documentElement.attributes) {
+    if (name !== 'style' && name !== 'class') root.setAttribute(name, value);
+  }
+
+  cur.replaceWith(doc.importNode(sheet, true));
+  S.paper.reset();
+  return true;
+}
+
+/** 决定能不能原地换的那部分 <head>：皮肤和纸张的 CSS、<base> */
+function headKey(d) {
+  const css = d.querySelector('head > style:not([id])')?.textContent ?? '';
+  return `${d.querySelector('base')?.href ?? ''}\n${css}`;
+}
+
 function alignPaper() {
   const doc = frame.contentDocument;
   const sheet = doc?.querySelector('.sheet');
   if (!sheet) return;
   const minH = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--paper-h'), 10) || 1123;
-  frame.style.height = `${Math.max(minH, doc.documentElement.scrollHeight)}px`;
   const r = sheet.getBoundingClientRect();
+  const top = r.top + frame.contentWindow.scrollY;
+  // 按纸的实际高度给，不用 scrollHeight：iframe 一旦撑高，scrollHeight 就不会再变小
+  const h = Math.max(minH, Math.ceil(r.height));
+  frame.style.height = `${Math.ceil(top + h) + 40}px`;
   frame.style.left = `${-Math.round(r.left)}px`;
-  frame.style.top = `${-Math.round(r.top)}px`;
+  frame.style.top = `${-Math.round(top)}px`;
+  // 多页模式下纸会长高，外框跟着长，第二页往后才看得见
+  frame.parentElement.style.height = `${h}px`;
 }
 
 async function measure() {
@@ -173,6 +225,9 @@ async function measure() {
     if (win.__fitReady) await win.__fitReady;
     const fit = win.__measureFit ? win.__measureFit() : win.__resumeFit;
     showFit(fit);
+    S.paper?.markFit(fit);
+    // 多页时纸高随内容变，敲字也可能多出一页
+    if (fit?.multipage) alignPaper();
   } catch {
     setFit('idle', '量不出来');
   }
@@ -206,12 +261,25 @@ function applyEdit(path, value) {
 
   setAt(S.data, path, value === '' && isOptional(path) ? null : value);
   markDirty();
+  // 提交后标记字段会按 inline() 重画，高度可能变
+  scheduleMeasure(true);
 
   if (/^sections\.\d+\.title$/.test(path)) refreshSections();
 }
 
 async function applyStructure(act, rowPath, extra = {}) {
   if (act === 'rerender') return rerender();
+
+  // 补回一个没显示的字段：填占位，重渲染后整段选中，打字即替换
+  if (act === 'field') {
+    pushUndo();
+    const focus = fillField(S.data, rowPath, extra.key);
+    if (!focus) return S.undo.pop();
+    S.pendingFocus = { path: focus, caret: 'all' };
+    markDirty();
+    refreshSections();
+    return rerender();
+  }
 
   pushUndo();
   const loc = locate(S.data, rowPath);
@@ -229,10 +297,16 @@ async function applyStructure(act, rowPath, extra = {}) {
         arrPath: loc.arrPath,
         index: loc.index + 1,
         fieldSuffix: FOCUS_SUFFIX[loc.type] ?? '',
-        caret: 'end',
+        // 新行里是占位字，整段选中，直接打字就换掉
+        caret: 'all',
       };
     }
     toast(`加了${q}${label(loc.type)}`);
+  }
+
+  if (act === 'dup') {
+    loc.arr.splice(loc.index + 1, 0, snap(loc.arr[loc.index]));
+    toast(`复制了${q}${label(loc.type)}`);
   }
 
   if (act === 'del') {
@@ -397,10 +471,11 @@ function refreshPageLimitButton() {
 }
 
 let measureTimer = null;
-function scheduleMeasure() {
+/** @param {boolean} [quiet] 敲字时不闪"重排…"，等量完直接换结果 */
+function scheduleMeasure(quiet = false) {
   clearTimeout(measureTimer);
-  setFit('busy', '重排…');
-  measureTimer = setTimeout(measure, 220);
+  if (!quiet) setFit('busy', '重排…');
+  measureTimer = setTimeout(measure, quiet ? 160 : 220);
 }
 
 function fillSkins() {
@@ -427,16 +502,17 @@ function refreshSections() {
     onJump: (i) => {
       const el = frame.contentDocument?.querySelector(`[data-row="sections.${i}"]`);
       el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      el?.classList.add('sk-hot');
-      setTimeout(() => el?.classList.remove('sk-hot'), 900);
+      el?.classList.add('sk-flash');
+      setTimeout(() => el?.classList.remove('sk-flash'), 900);
     },
     onVariant: async (i) => {
-      const order = ['entry', 'project', 'list'];
+      const order = ['entry', 'project', 'list', 'text'];
       const s = S.data.sections[i];
       pushUndo();
       s.variant = order[(order.indexOf(s.variant) + 1) % order.length];
       if (s.variant === 'list' && !s.items?.length) s.items = [blank('item')];
-      if (s.variant !== 'list' && !s.entries?.length) s.entries = [blank('entry')];
+      if (s.variant === 'text' && !s.body) s.body = S.data.meta?.lang === 'en' ? 'A short summary about you.' : '用一两句话介绍自己。';
+      if ((s.variant === 'entry' || s.variant === 'project') && !s.entries?.length) s.entries = [blank('entry')];
       markDirty();
       refreshSections();
       await rerender();
@@ -567,19 +643,13 @@ function placeFmtBar(rect) {
 
 fmtBar.addEventListener('mousedown', (e) => {
   e.preventDefault();
-  const mark = e.target.closest('button')?.dataset.wrap;
-  if (!mark) return;
+  const key = e.target.closest('button')?.dataset.key;
+  if (!key) return;
   const win = frame.contentWindow;
   const doc = frame.contentDocument;
   const el = doc?.querySelector('.sk-editing');
   if (!el) return;
-  el.dispatchEvent(
-    new win.KeyboardEvent('keydown', {
-      key: mark === '**' ? 'b' : 'e',
-      metaKey: true,
-      bubbles: true,
-    }),
-  );
+  el.dispatchEvent(new win.KeyboardEvent('keydown', { key, metaKey: true, bubbles: true }));
 });
 
 // ── 提示条 ──

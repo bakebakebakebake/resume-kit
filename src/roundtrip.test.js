@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { load, lint, reindex } from './data.js';
 import { emitYaml } from './emit-yaml.js';
 import { render } from './render.js';
-import { inline, tokens, lintInline } from './markup.js';
+import { inline, tokens, fromTokens, lintInline } from './markup.js';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -131,6 +131,35 @@ export function runTests(dataFile) {
     JSON.stringify(lintInline('见 [主页(https://a.com)')),
   );
   ok('lint 不误报正常链接', lintInline('见 [主页](https://a.com) 和 **粗**').length === 0);
+
+  // 工作台所见即所得：DOM 读成片段，再写回标记。写回去的东西
+  // 再解析一遍必须得到同样的文字和格式，否则改一个字会把别处的格式弄丢。
+  console.log('\n片段 → 标记（所见即所得写回）');
+  const same = (s) => JSON.stringify(tokens(fromTokens(tokens(s)))) === JSON.stringify(tokens(s));
+  for (const s of [
+    '普通 **粗 `码`** 尾',
+    '[**粗** 尾](https://a.com)',
+    'x **[l](mailto:a@b.com)** y',
+    'a \\* b \\` c \\[d\\]',
+    '`a\\`b`',
+  ]) {
+    ok(`往返不变：${s}`, same(s), fromTokens(tokens(s)));
+  }
+  const lit = [{ text: '2*3 = `6` [注] **x**', bold: false, code: false, href: null }];
+  ok('用户敲的标记字符按字面量写回', same(fromTokens(lit)) && tokens(fromTokens(lit))[0].text === lit[0].text, fromTokens(lit));
+  ok('路径里的反斜杠不被改写', fromTokens([{ text: 'C:\\Users\\me' }]) === 'C:\\Users\\me');
+  ok(
+    '末尾反斜杠挨着粗体不会吞掉标记',
+    JSON.stringify(tokens(fromTokens([{ text: 'a\\' }, { text: 'b', bold: true }])).map((x) => [x.text, x.bold])) ===
+      '[["a\\\\",false],["b",true]]',
+    fromTokens([{ text: 'a\\' }, { text: 'b', bold: true }]),
+  );
+  ok(
+    '链接地址里的空格和括号被编码',
+    tokens(fromTokens([{ text: 'x', href: 'https://a.com/a b(c)' }]))[0].href === 'https://a.com/a%20b%28c%29',
+    fromTokens([{ text: 'x', href: 'https://a.com/a b(c)' }]),
+  );
+  ok('不安全的地址写回时丢掉', fromTokens([{ text: 'x', href: 'javascript:1' }]) === 'x');
 
   console.log('\n页数模式');
   {
@@ -255,6 +284,61 @@ export function runTests(dataFile) {
     );
     // @import 被基础层挤到后面就整条失效，中日韩字体静默回落到系统字体
     ok('@import 仍在样式表最前', /<style>\s*@import/.test(css(lt)));
+  }
+
+  console.log('\n文字章节');
+  {
+    const f = join(tmp, 'text.yaml');
+    const body = '热爱后端，熟悉 **高并发** 场景，常用 `Go` / `Java`，见 [主页](https://a.com)。';
+    const src = `meta:\n  skin: datasheet\n  output: x\nprofile:\n  name: 张三\nsections:\n  - title: A\n    entries:\n      - org: O\n  - title: 自我评价\n    variant: text\n    body: ${JSON.stringify(body)}\n`;
+    writeFileSync(f, src, 'utf8');
+    const d = load(f);
+    const s = d.sections[1];
+    ok('text 解析成 isText', s.isText === true && !s.isList && !s.isProject);
+    ok('body 原样读进来', s.body === body, JSON.stringify(s.body));
+    ok('text 不算错误也不报警', lint(d).errors.length === 0 && lint(d).warnings.length === 0, JSON.stringify(lint(d)));
+
+    const y = emitYaml(d);
+    ok('写出 variant: text', y.includes('    variant: text\n'));
+    const block = y.slice(y.indexOf('- title: 自我评价'));
+    ok('text 章节不写 entries / items', !/entries:|items:/.test(block), block);
+
+    const f2 = join(tmp, 'text2.yaml');
+    writeFileSync(f2, y, 'utf8');
+    const d2 = load(f2);
+    ok('text 存盘后数据不变', JSON.stringify(strip(d)) === JSON.stringify(strip(d2)), firstDiff(strip(d), strip(d2)));
+    ok('text 二次序列化稳定', emitYaml(d2) === y);
+
+    // 以 ** 开头的 body 必须加引号，不然 YAML 当成别名直接报错
+    d2.sections[1].body = '**开头加粗** 收尾';
+    const f3 = join(tmp, 'text3.yaml');
+    writeFileSync(f3, emitYaml(d2), 'utf8');
+    ok('星号开头的 body 保住了', load(f3).sections[1].body === '**开头加粗** 收尾');
+
+    const html = render(d, ROOT, {});
+    const p = html.match(/<p class="sec-text"[^>]*>[\s\S]*?<\/p>/)?.[0] ?? '';
+    ok('HTML 带 data-bind', p.includes('data-bind="sections.1.body"'), p);
+    ok(
+      'HTML 里标记落成格式',
+      p.includes('<span class="lead">高并发</span>') &&
+        p.includes('<span class="t">Go</span>') &&
+        p.includes('<a class="lk" href="https://a.com">主页</a>'),
+      p,
+    );
+    ok('text 章节不渲染条目容器', !/data-list="sections\.1\./.test(html));
+
+    const e = join(tmp, 'text-empty.yaml');
+    writeFileSync(e, src.replace(/ {4}body: .*\n/, ''), 'utf8');
+    const de = load(e);
+    ok('没写 body 是空串', de.sections[1].body === '');
+    ok('空 body 报警', lint(de).warnings.some((w) => w.includes('body 为空')), JSON.stringify(lint(de).warnings));
+    de.sections[1].body = '未闭合 **粗';
+    ok('body 过行内标记校验', lint(de).warnings.some((w) => w.includes('.body')));
+
+    // 工作台切形态只改 variant，派生位靠 reindex 重算
+    d.sections[0].variant = 'text';
+    reindex(d);
+    ok('reindex 重算 isText 并补 body', d.sections[0].isText === true && d.sections[0].body === '');
   }
 
   console.log('\nYAML 往返');

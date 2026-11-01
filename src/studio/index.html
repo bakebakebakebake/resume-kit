@@ -78,7 +78,7 @@
           <li>在要点或技能行按 <b>Enter</b> 在下面续写一条，<b>⌫</b> 清空后再按一次删掉这条</li>
           <li><b>⌥↑</b> / <b>⌥↓</b> 移动当前行，鼠标也可拖动 <b>⠿</b> 排序</li>
           <li>鼠标移到一行，左边出现 <b>⠿ + ×</b>：拖动排序、加一条、删一条</li>
-          <li>要点和技能支持 <code>**重点**</code> 和 <code>`技术名`</code>，选中文字按 <b>⌘B</b> / <b>⌘E</b></li>
+          <li>改的就是纸上的字，所见即所得。选中文字按 <b>⌘B</b> 加粗、<b>⌘E</b> 标技术名、<b>⌘K</b> 加链接</li>
           <li>改完点保存，写回 <code>resume.yaml</code>，旧版本留在 <code>.studio-backups/</code></li>
         </ul>
       </section>
@@ -88,8 +88,9 @@
 </main>
 
 <div class="fmt-bar" id="fmt-bar" hidden>
-  <button data-wrap="**" title="加粗 ⌘B"><b>B</b></button>
-  <button data-wrap="`" title="技术名 ⌘E"><code>T</code></button>
+  <button data-key="b" title="加粗 ⌘B"><b>B</b></button>
+  <button data-key="e" title="技术名 ⌘E"><code>T</code></button>
+  <button data-key="k" title="链接 ⌘K">🔗</button>
 </div>
 
 <div class="toast" id="toast" hidden></div>
